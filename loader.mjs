@@ -1,25 +1,13 @@
 /**
- * Tiny ESM resolver hook so the compiled output (dist/) can use the `@/*` path
- * alias at runtime under plain Node — with NO extra dependency (no tsc-alias).
+ * Registers the ESM resolve hook (hooks.mjs) so the compiled output in dist/ can
+ * use the `@/*` path alias at runtime under plain Node — with NO extra dependency.
  *
- * tsconfig maps `@/* -> src/*`; after `tsc`, those imports become `@/foo.js`
- * inside dist/. This hook rewrites a leading `@/` to an absolute file URL under
- * dist/, so `node --import ./loader.mjs dist/index.js` resolves them.
- *
- * Dev (`tsx`) and tests (`vitest`) resolve the alias via their own configs;
- * this hook is ONLY needed for the production `node dist/...` path. See README
- * "Path alias / runtime resolution".
+ * Used only by the production start path: `node --import ./loader.mjs dist/index.js`.
+ * `module.register` (Node 20.6+) is the SUPPORTED way to register loader hooks;
+ * merely exporting `resolve` does nothing under `--import` (that only worked with
+ * the now-deprecated `--loader` flag). Dev (`tsx`) and tests (`vitest`) resolve
+ * the alias via their own configs; this is only for `node dist/...`.
  */
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, resolve as resolvePath } from 'node:path';
+import { register } from 'node:module';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const DIST = resolvePath(here, 'dist');
-
-export async function resolve(specifier, context, nextResolve) {
-  if (specifier.startsWith('@/')) {
-    const target = resolvePath(DIST, specifier.slice(2));
-    return nextResolve(pathToFileURL(target).href, context);
-  }
-  return nextResolve(specifier, context);
-}
+register('./hooks.mjs', import.meta.url);
