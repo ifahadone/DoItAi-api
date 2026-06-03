@@ -170,6 +170,47 @@ describe('the sync loop', () => {
     const replay = await push(a.accessToken, [op]); // same opId
     expect(replay.json().results[0].status).toBe('duplicate');
   });
+
+  it('field-level conflict: concurrent edits to DIFFERENT fields both survive', async () => {
+    const a = await signIn('apple-user-A');
+    const taskId = randomUUID();
+    const tCreate = '2026-01-01T00:00:00.000Z';
+    const tTitle = '2026-02-01T00:00:00.000Z';
+    const tNotes = '2026-03-01T00:00:00.000Z';
+
+    // Create (v1) with title + notes.
+    const create = await push(a.accessToken, [
+      {
+        opId: randomUUID(), entityType: 'task', entityId: taskId, op: 'upsert',
+        baseVersion: 0, clientUpdatedAt: tCreate,
+        fields: { title: 'Original', notes: 'original notes', status: 1, priority: 0, rank: 0, isAllDay: false },
+      },
+    ]);
+    expect(create.json().results[0].status).toBe('applied');
+
+    // Client A edits TITLE only, from the current version (fast path → v2).
+    const editTitle = await push(a.accessToken, [
+      { opId: randomUUID(), entityType: 'task', entityId: taskId, op: 'upsert',
+        baseVersion: 1, clientUpdatedAt: tTitle, fields: { title: 'A edited title' } },
+    ]);
+    expect(editTitle.json().results[0].status).toBe('applied');
+    expect(editTitle.json().results[0].serverVersion).toBe(2);
+
+    // Client B (offline since v1) edits NOTES only — a STALE baseVersion 1, but a different field.
+    const editNotes = await push(a.accessToken, [
+      { opId: randomUUID(), entityType: 'task', entityId: taskId, op: 'upsert',
+        baseVersion: 1, clientUpdatedAt: tNotes, fields: { notes: 'B edited notes' } },
+    ]);
+    expect(editNotes.json().results[0].status).toBe('merged'); // diverged base → field-level merge
+
+    // The latest server snapshot must carry BOTH A's title and B's notes.
+    const changes = pull
+      ? (await pull(a.accessToken)).json().changes.filter((c: { entityId: string }) => c.entityId === taskId)
+      : [];
+    const latest = changes[changes.length - 1];
+    expect(latest.payload.title).toBe('A edited title');
+    expect(latest.payload.notes).toBe('B edited notes');
+  });
 });
 
 describe('cross-tenant isolation (ApiSpec §4.3 — application-level gate)', () => {

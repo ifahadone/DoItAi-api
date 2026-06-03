@@ -121,6 +121,8 @@ async function processOp(
         patch,
         baseVersion: op.baseVersion,
         clientUpdatedAt: op.clientUpdatedAt,
+        // Field-level LWW for tasks (ApiSpec §6.1); row-level for entities without per-field meta.
+        ...(op.entityType === 'task' ? { fieldMeta: current.fieldMeta } : {}),
       });
 
       // Structural / version conflict: nothing written, but it's a real result.
@@ -174,16 +176,25 @@ async function processOp(
         changeOp = 'delete';
         payload = null;
       } else {
-        // upsert
+        // upsert — advance per-field LWW metadata for tasks (every field we actually wrote).
+        const appliedFields = decision.apply.fields;
+        let nextFieldMeta: Record<string, { v: number; updatedAt: string }> | undefined;
+        if (op.entityType === 'task') {
+          nextFieldMeta = { ...(current.fieldMeta ?? {}) };
+          for (const key of Object.keys(appliedFields)) {
+            nextFieldMeta[key] = { v: newVersion, updatedAt: op.clientUpdatedAt };
+          }
+        }
         payload = await repo.applyUpsert(
           {
             entityType: op.entityType,
             entityId: op.entityId,
             ownerId,
-            fields: decision.apply.fields,
+            fields: appliedFields,
             newVersion,
             nowIso: clock.nowIso(),
             isNew: !current.exists,
+            ...(nextFieldMeta ? { fieldMeta: nextFieldMeta } : {}),
           },
           tx,
         );

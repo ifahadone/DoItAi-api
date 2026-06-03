@@ -159,13 +159,49 @@ export function resolve(input: ResolveInput): ResolveResult {
     };
   }
 
-  // baseVersion < current.serverVersion: someone else wrote first. Row-level LWW.
+  // baseVersion < current.serverVersion: someone else wrote first → merge.
   const clientMs = toMs(clientUpdatedAt);
-  const serverMs = toMs(current.updatedAt);
 
+  // FIELD-LEVEL LWW when per-field metadata is supplied (tasks, ApiSpec §6.1):
+  // decide each patched field independently against the time the SERVER last
+  // wrote THAT field. Concurrent edits to *different* fields therefore both
+  // survive; only edits to the SAME field race (last-writer-wins).
+  if (input.fieldMeta) {
+    const meta = input.fieldMeta;
+    const clientWins: Record<string, unknown> = {};
+    const serverWins: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(patch.fields)) {
+      const fieldMs = toMs(meta[key]?.updatedAt);
+      if (clientMs > fieldMs) {
+        clientWins[key] = value; // client's edit is newer → it wins this field
+      } else {
+        serverWins[key] = current.fields[key]; // server's value is newer-or-equal → keep it
+      }
+    }
+    if (Object.keys(clientWins).length === 0) {
+      // Every patched field lost to the server. Hand back the authoritative values.
+      return {
+        status: 'merged',
+        apply: { kind: 'noop' },
+        serverFields: serverWins,
+        bumpVersion: false,
+        reason: null,
+      };
+    }
+    return {
+      status: 'merged',
+      apply: { kind: 'upsert', fields: clientWins },
+      // Non-null only when the server actually kept some fields the client tried to change.
+      serverFields: Object.keys(serverWins).length > 0 ? serverWins : null,
+      bumpVersion: true,
+      reason: null,
+    };
+  }
+
+  // ROW-LEVEL LWW fallback (entities without field metadata, e.g. lists/tags).
+  const serverMs = toMs(current.updatedAt);
   if (clientMs > serverMs) {
-    // Client is newer -> client wins wholesale. Still a 'merged' status because
-    // the base version diverged (client must re-anchor to the new serverVersion).
+    // Client newer → client wins wholesale (still 'merged': base diverged).
     return {
       status: 'merged',
       apply: { kind: 'upsert', fields: patch.fields },
@@ -174,9 +210,7 @@ export function resolve(input: ResolveInput): ResolveResult {
       reason: null,
     };
   }
-
-  // Server is newer-or-equal -> server wins wholesale. Drop the patch and hand
-  // the client the authoritative fields to adopt.
+  // Server newer-or-equal → server wins wholesale; hand the client the row to adopt.
   return {
     status: 'merged',
     apply: { kind: 'noop' },

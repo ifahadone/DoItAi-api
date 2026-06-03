@@ -38,6 +38,8 @@ export interface CurrentEntity {
   deleted: boolean;
   /** Wire-shaped snapshot of the current row (for serverFields on server-win). */
   payload: Record<string, unknown>;
+  /** Per-field LWW metadata (tasks only); undefined for entities tracked row-level. */
+  fieldMeta?: Record<string, { v: number; updatedAt: string }>;
 }
 
 const ABSENT: CurrentEntity = {
@@ -95,6 +97,7 @@ export async function loadCurrent(
       updatedAt: row.updatedAt,
       deleted: row.deletedAt !== null,
       payload: taskRowToPayload(row, tagIds),
+      fieldMeta: (row.fieldMeta ?? {}) as Record<string, { v: number; updatedAt: string }>,
     };
   }
   if (entityType === 'list') {
@@ -154,6 +157,8 @@ export interface ApplyUpsertArgs {
   nowIso: string;
   /** True when the row did not previously exist (drives INSERT vs UPDATE). */
   isNew: boolean;
+  /** Updated per-field LWW metadata to persist (tasks only; merged by the service). */
+  fieldMeta?: Record<string, { v: number; updatedAt: string }>;
 }
 
 /**
@@ -180,6 +185,7 @@ export async function applyUpsert(args: ApplyUpsertArgs, tx: Tx): Promise<Record
         id: args.entityId,
         ownerId: args.ownerId,
         title: typeof cols['title'] === 'string' ? (cols['title'] as string) : '',
+        ...(args.fieldMeta ? { fieldMeta: args.fieldMeta } : {}),
         createdAt: args.nowIso,
         updatedAt: args.nowIso,
         serverVersion: args.newVersion,
@@ -190,7 +196,12 @@ export async function applyUpsert(args: ApplyUpsertArgs, tx: Tx): Promise<Record
       // upsert-over-delete), so we don't touch deletedAt here.
       await tx
         .update(tasks)
-        .set({ ...colVals, updatedAt: args.nowIso, serverVersion: args.newVersion })
+        .set({
+          ...colVals,
+          ...(args.fieldMeta ? { fieldMeta: args.fieldMeta } : {}),
+          updatedAt: args.nowIso,
+          serverVersion: args.newVersion,
+        })
         .where(eq(tasks.id, args.entityId));
     }
     await syncTaskTags(args.entityId, tagIds, tx);

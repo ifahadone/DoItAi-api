@@ -11,10 +11,9 @@
  *   - new-row create (absent current)
  *
  * The 'duplicate' status is an idempotency-layer concern (service + DB), not the
- * resolver's, so it is exercised in the integration suite (Phase 1), noted here.
+ * resolver's, so it is exercised in the integration suite (test/sync.itest.ts).
  *
- * NOTE: these tests were authored but NOT executed in this environment (no
- * node_modules / no `npm install`). Run with `npm test` after install.
+ * Field-level LWW (tasks, with `fieldMeta`) is covered in its own block below.
  */
 import { describe, it, expect } from 'vitest';
 import { resolve, type CurrentRecord, type Patch } from '@/modules/sync/conflict.js';
@@ -168,6 +167,55 @@ describe('conflict.resolve — client-ahead guard', () => {
     expect(r.status).toBe('conflict');
     expect(r.apply).toEqual({ kind: 'noop' });
     expect(r.reason).toMatch(/stale_server/);
+  });
+});
+
+describe('conflict.resolve — field-level LWW (tasks, fieldMeta provided)', () => {
+  it('merges per field: client-newer fields win, server-newer fields are kept', () => {
+    const r = resolve({
+      current: live(5, T2, { title: 'server-title', notes: 'server-notes' }),
+      patch: upsert({ title: 'client-title', notes: 'client-notes' }),
+      baseVersion: 3, // diverged → conflict path
+      clientUpdatedAt: T1,
+      fieldMeta: {
+        title: { v: 5, updatedAt: T2 }, // server set title at T2 (newer than client T1) → server keeps
+        notes: { v: 4, updatedAt: T0 }, // server set notes at T0 (older than client T1) → client wins
+      },
+    });
+    expect(r.status).toBe('merged');
+    expect(r.apply).toEqual({ kind: 'upsert', fields: { notes: 'client-notes' } });
+    expect(r.serverFields).toEqual({ title: 'server-title' });
+    expect(r.bumpVersion).toBe(true);
+  });
+
+  it('client wins a field with no prior per-field metadata', () => {
+    const r = resolve({
+      current: live(2, T2, { title: 'server' }),
+      patch: upsert({ title: 'client' }),
+      baseVersion: 1,
+      clientUpdatedAt: T0, // older than the row, but the field was never individually tracked
+      fieldMeta: {}, // empty → field time is -∞ → client wins
+    });
+    expect(r.status).toBe('merged');
+    expect(r.apply).toEqual({ kind: 'upsert', fields: { title: 'client' } });
+    expect(r.serverFields).toBeNull();
+  });
+
+  it('server keeps every field when all are older on the client → noop', () => {
+    const r = resolve({
+      current: live(5, T2, { title: 'server', notes: 'server-n' }),
+      patch: upsert({ title: 'c', notes: 'cn' }),
+      baseVersion: 2,
+      clientUpdatedAt: T0,
+      fieldMeta: {
+        title: { v: 5, updatedAt: T1 },
+        notes: { v: 5, updatedAt: T1 },
+      },
+    });
+    expect(r.status).toBe('merged');
+    expect(r.apply).toEqual({ kind: 'noop' });
+    expect(r.serverFields).toEqual({ title: 'server', notes: 'server-n' });
+    expect(r.bumpVersion).toBe(false);
   });
 });
 
