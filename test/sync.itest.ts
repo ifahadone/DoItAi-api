@@ -242,3 +242,52 @@ describe('cross-tenant isolation (ApiSpec §4.3 — application-level gate)', ()
     expect(bWrite.json().results[0].status).toBe('rejected');
   });
 });
+
+describe('device registration (P1-B)', () => {
+  function registerDevice(token: string, payload: Record<string, unknown>) {
+    return app.inject({
+      method: 'POST',
+      url: '/api/v1/devices',
+      headers: { authorization: `Bearer ${token}`, 'idempotency-key': randomUUID() },
+      payload,
+    });
+  }
+
+  it('registers then refreshes a device (idempotent upsert; token not echoed)', async () => {
+    const a = await signIn('apple-user-A');
+    const deviceId = randomUUID();
+
+    const reg = await registerDevice(a.accessToken, {
+      id: deviceId,
+      apnsToken: 'apns-token-1',
+      platform: 'ios',
+      appVersion: '0.1.0',
+      pushPrefs: { reminders: true },
+    });
+    expect(reg.statusCode).toBe(200);
+    const body = reg.json();
+    expect(body.id).toBe(deviceId);
+    expect(body.hasApnsToken).toBe(true);
+    expect(body.pushPrefs.reminders).toBe(true);
+    expect(body.apnsToken).toBeUndefined(); // raw token never echoed
+
+    // Re-register the same id with a new token → update, not a second row.
+    const reg2 = await registerDevice(a.accessToken, { id: deviceId, apnsToken: 'apns-token-2' });
+    expect(reg2.statusCode).toBe(200);
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/v1/devices',
+      headers: { authorization: `Bearer ${a.accessToken}` },
+    });
+    // Re-registering the same id upserts (one row for that id), not a duplicate.
+    // (Sign-in itself also registers a device, so we filter to the one under test.)
+    const mine = list.json().items.filter((d: { id: string }) => d.id === deviceId);
+    expect(mine).toHaveLength(1);
+  });
+
+  it('requires auth', async () => {
+    const res = await app.inject({ method: 'POST', url: '/api/v1/devices', payload: { id: randomUUID() } });
+    expect(res.statusCode).toBe(401);
+  });
+});

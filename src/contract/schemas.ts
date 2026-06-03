@@ -272,6 +272,29 @@ export const DeviceInfoSchema = z
   .strict();
 export type DeviceInfo = z.infer<typeof DeviceInfoSchema>;
 
+/** `POST /devices` body — register/refresh this device's push token + prefs (ApiSpec §7.6, §10). */
+export const DeviceRegisterSchema = z
+  .object({
+    id: zUuid, // client-generated, stable device id (same as the auth deviceId)
+    apnsToken: z.string().nullable().default(null),
+    platform: z.string().default('ios'),
+    appVersion: z.string().nullable().default(null),
+    pushPrefs: z.record(z.unknown()).default({}),
+  })
+  .strict();
+export type DeviceRegister = z.infer<typeof DeviceRegisterSchema>;
+
+/** Device as returned by the API. The raw APNs token is never echoed back (only `hasApnsToken`). */
+export const DeviceSchema = z.object({
+  id: zUuid,
+  platform: z.string(),
+  appVersion: z.string().nullable(),
+  pushPrefs: z.record(z.unknown()),
+  hasApnsToken: z.boolean(),
+  lastSeenAt: zTimestamp.nullable(),
+});
+export type Device = z.infer<typeof DeviceSchema>;
+
 export const AppleSignInSchema = z
   .object({
     identityToken: z.string().min(1),
