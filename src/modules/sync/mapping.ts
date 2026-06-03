@@ -19,6 +19,15 @@ import type {
 import type { EntityType } from '@/contract/schemas.js';
 
 /**
+ * Normalize a Postgres `timestamptz` text value (Drizzle `mode: 'string'` returns
+ * e.g. "2026-06-03 18:35:54.561+00") to RFC3339 ("2026-06-03T18:35:54.561Z") —
+ * the format the contract promises and clients parse (ApiSpec §3). Null-safe.
+ */
+function iso(s: string | null | undefined): string | null {
+  return s == null ? null : new Date(s).toISOString();
+}
+
+/**
  * Serialize a Task row into the wire shape (contract `Task`). The DB column
  * `field_meta` is internal and intentionally NOT emitted.
  */
@@ -37,9 +46,9 @@ export function taskRowToPayload(
     priority: row.priority,
     rank: row.rank,
     energy: row.energy,
-    dueAt: row.dueAt,
-    scheduledStart: row.scheduledStart,
-    scheduledEnd: row.scheduledEnd,
+    dueAt: iso(row.dueAt),
+    scheduledStart: iso(row.scheduledStart),
+    scheduledEnd: iso(row.scheduledEnd),
     estimatedMinutes: row.estimatedMinutes,
     actualMinutes: row.actualMinutes,
     isAllDay: row.isAllDay,
@@ -50,12 +59,12 @@ export function taskRowToPayload(
     location: row.location ?? null,
     url: row.url,
     tagIds,
-    completedAt: row.completedAt,
+    completedAt: iso(row.completedAt),
     archived: row.archived,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
     serverVersion: row.serverVersion,
-    deletedAt: row.deletedAt,
+    deletedAt: iso(row.deletedAt),
   };
 }
 
@@ -68,10 +77,10 @@ export function taskListRowToPayload(row: TaskListRow): Record<string, unknown> 
     icon: row.icon,
     sortIndex: row.sortIndex,
     shareId: row.shareId,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
     serverVersion: row.serverVersion,
-    deletedAt: row.deletedAt,
+    deletedAt: iso(row.deletedAt),
   };
 }
 
@@ -81,10 +90,10 @@ export function tagRowToPayload(row: TagRow): Record<string, unknown> {
     ownerId: row.ownerId,
     name: row.name,
     colorHex: row.colorHex,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
     serverVersion: row.serverVersion,
-    deletedAt: row.deletedAt,
+    deletedAt: iso(row.deletedAt),
   };
 }
 
@@ -94,15 +103,15 @@ export function reminderRowToPayload(row: ReminderRow): Record<string, unknown> 
     ownerId: row.ownerId,
     taskId: row.taskId,
     kind: row.kind,
-    fireAt: row.fireAt,
+    fireAt: iso(row.fireAt),
     offsetMinutes: row.offsetMinutes,
     region: row.region ?? null,
     interruption: row.interruption,
     notificationId: row.notificationId,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
     serverVersion: row.serverVersion,
-    deletedAt: row.deletedAt,
+    deletedAt: iso(row.deletedAt),
   };
 }
 
@@ -114,10 +123,10 @@ export function checklistItemRowToPayload(row: ChecklistItemRow): Record<string,
     text: row.text,
     done: row.done,
     ord: row.ord,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
     serverVersion: row.serverVersion,
-    deletedAt: row.deletedAt,
+    deletedAt: iso(row.deletedAt),
   };
 }
 
