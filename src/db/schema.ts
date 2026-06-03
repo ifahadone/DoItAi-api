@@ -262,6 +262,57 @@ export const idempotencyKeys = pgTable('idempotency_keys', {
   createdAt: tsNow(),
 });
 
+// ============================================================================
+// reminders (a task's nudges; ApiSpec §5.7). Synced like any other entity.
+// ============================================================================
+export const reminders = pgTable(
+  'reminders',
+  {
+    id: uuid('id').primaryKey(),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    kind: smallint('kind').notNull().default(0), // 0 absolute,1 relativeToDue,2 location,3 recurring
+    fireAt: tsNull(),
+    offsetMinutes: integer('offset_minutes'),
+    region: jsonb('region'),
+    interruption: smallint('interruption').notNull().default(1), // 0 passive,1 active,2 timeSensitive,3 critical
+    notificationId: text('notification_id'),
+    createdAt: tsNow(),
+    updatedAt: tsNow(),
+    serverVersion: integer('server_version').notNull().default(1),
+    deletedAt: tsNull(),
+  },
+  (t) => [index('reminders_task_idx').on(t.taskId)],
+);
+
+// ============================================================================
+// checklist_items (lightweight sub-items of a task; ApiSpec §5.1). Synced.
+// ============================================================================
+export const checklistItems = pgTable(
+  'checklist_items',
+  {
+    id: uuid('id').primaryKey(),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    done: boolean('done').notNull().default(false),
+    ord: integer('ord').notNull().default(0),
+    createdAt: tsNow(),
+    updatedAt: tsNow(),
+    serverVersion: integer('server_version').notNull().default(1),
+    deletedAt: tsNull(),
+  },
+  (t) => [index('checklist_items_task_idx').on(t.taskId)],
+);
+
 // --- Inferred row types (handy in repositories/services) -------------------
 export type UserRow = typeof users.$inferSelect;
 export type DeviceRow = typeof devices.$inferSelect;
@@ -269,6 +320,8 @@ export type RefreshTokenRow = typeof refreshTokens.$inferSelect;
 export type TaskListRow = typeof taskLists.$inferSelect;
 export type TagRow = typeof tags.$inferSelect;
 export type TaskRow = typeof tasks.$inferSelect;
+export type ReminderRow = typeof reminders.$inferSelect;
+export type ChecklistItemRow = typeof checklistItems.$inferSelect;
 export type ChangeLogRow = typeof changeLog.$inferSelect;
 export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
 
@@ -281,6 +334,8 @@ export const schema = {
   tags,
   tasks,
   taskTags,
+  reminders,
+  checklistItems,
   changeLog,
   idempotencyKeys,
 };

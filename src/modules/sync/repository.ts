@@ -18,6 +18,8 @@ import {
   taskLists,
   tags,
   taskTags,
+  reminders,
+  checklistItems,
   changeLog,
   idempotencyKeys,
 } from '@/db/schema.js';
@@ -26,6 +28,8 @@ import {
   taskRowToPayload,
   taskListRowToPayload,
   tagRowToPayload,
+  reminderRowToPayload,
+  checklistItemRowToPayload,
   upsertableColumns,
 } from '@/modules/sync/mapping.js';
 
@@ -111,6 +115,32 @@ export async function loadCurrent(
       updatedAt: row.updatedAt,
       deleted: row.deletedAt !== null,
       payload: taskListRowToPayload(row),
+    };
+  }
+  if (entityType === 'reminder') {
+    const rows = await tx.select().from(reminders).where(eq(reminders.id, entityId)).limit(1);
+    const row = rows[0];
+    if (!row) return ABSENT;
+    return {
+      exists: true,
+      ownerId: row.ownerId,
+      serverVersion: row.serverVersion,
+      updatedAt: row.updatedAt,
+      deleted: row.deletedAt !== null,
+      payload: reminderRowToPayload(row),
+    };
+  }
+  if (entityType === 'checklist') {
+    const rows = await tx.select().from(checklistItems).where(eq(checklistItems.id, entityId)).limit(1);
+    const row = rows[0];
+    if (!row) return ABSENT;
+    return {
+      exists: true,
+      ownerId: row.ownerId,
+      serverVersion: row.serverVersion,
+      updatedAt: row.updatedAt,
+      deleted: row.deletedAt !== null,
+      payload: checklistItemRowToPayload(row),
     };
   }
   // tag
@@ -233,6 +263,53 @@ export async function applyUpsert(args: ApplyUpsertArgs, tx: Tx): Promise<Record
     return taskListRowToPayload(fresh[0]!);
   }
 
+  if (args.entityType === 'reminder') {
+    const colVals = cols as unknown as Partial<typeof reminders.$inferInsert>;
+    if (args.isNew) {
+      await tx.insert(reminders).values({
+        ...colVals,
+        id: args.entityId,
+        ownerId: args.ownerId,
+        taskId: cols['taskId'] as string,
+        createdAt: args.nowIso,
+        updatedAt: args.nowIso,
+        serverVersion: args.newVersion,
+        deletedAt: null,
+      });
+    } else {
+      await tx
+        .update(reminders)
+        .set({ ...colVals, updatedAt: args.nowIso, serverVersion: args.newVersion })
+        .where(eq(reminders.id, args.entityId));
+    }
+    const fresh = await tx.select().from(reminders).where(eq(reminders.id, args.entityId)).limit(1);
+    return reminderRowToPayload(fresh[0]!);
+  }
+
+  if (args.entityType === 'checklist') {
+    const colVals = cols as unknown as Partial<typeof checklistItems.$inferInsert>;
+    if (args.isNew) {
+      await tx.insert(checklistItems).values({
+        ...colVals,
+        id: args.entityId,
+        ownerId: args.ownerId,
+        taskId: cols['taskId'] as string,
+        text: typeof cols['text'] === 'string' ? (cols['text'] as string) : '',
+        createdAt: args.nowIso,
+        updatedAt: args.nowIso,
+        serverVersion: args.newVersion,
+        deletedAt: null,
+      });
+    } else {
+      await tx
+        .update(checklistItems)
+        .set({ ...colVals, updatedAt: args.nowIso, serverVersion: args.newVersion })
+        .where(eq(checklistItems.id, args.entityId));
+    }
+    const fresh = await tx.select().from(checklistItems).where(eq(checklistItems.id, args.entityId)).limit(1);
+    return checklistItemRowToPayload(fresh[0]!);
+  }
+
   // tag
   const colVals = cols as unknown as Partial<typeof tags.$inferInsert>;
   if (args.isNew) {
@@ -272,8 +349,12 @@ export async function applyDelete(args: ApplyDeleteArgs, tx: Tx): Promise<void> 
     await tx.update(tasks).set(patch).where(eq(tasks.id, args.entityId));
   } else if (args.entityType === 'list') {
     await tx.update(taskLists).set(patch).where(eq(taskLists.id, args.entityId));
-  } else {
+  } else if (args.entityType === 'tag') {
     await tx.update(tags).set(patch).where(eq(tags.id, args.entityId));
+  } else if (args.entityType === 'reminder') {
+    await tx.update(reminders).set(patch).where(eq(reminders.id, args.entityId));
+  } else {
+    await tx.update(checklistItems).set(patch).where(eq(checklistItems.id, args.entityId));
   }
 }
 

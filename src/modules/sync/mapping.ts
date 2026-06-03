@@ -9,7 +9,13 @@
  * Keeping this in one place means adding the next synced entity (checklist,
  * routine, …) is a single registry entry, not edits across the engine.
  */
-import type { TaskRow, TaskListRow, TagRow } from '@/db/schema.js';
+import type {
+  TaskRow,
+  TaskListRow,
+  TagRow,
+  ReminderRow,
+  ChecklistItemRow,
+} from '@/db/schema.js';
 import type { EntityType } from '@/contract/schemas.js';
 
 /**
@@ -82,6 +88,39 @@ export function tagRowToPayload(row: TagRow): Record<string, unknown> {
   };
 }
 
+export function reminderRowToPayload(row: ReminderRow): Record<string, unknown> {
+  return {
+    id: row.id,
+    ownerId: row.ownerId,
+    taskId: row.taskId,
+    kind: row.kind,
+    fireAt: row.fireAt,
+    offsetMinutes: row.offsetMinutes,
+    region: row.region ?? null,
+    interruption: row.interruption,
+    notificationId: row.notificationId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    serverVersion: row.serverVersion,
+    deletedAt: row.deletedAt,
+  };
+}
+
+export function checklistItemRowToPayload(row: ChecklistItemRow): Record<string, unknown> {
+  return {
+    id: row.id,
+    ownerId: row.ownerId,
+    taskId: row.taskId,
+    text: row.text,
+    done: row.done,
+    ord: row.ord,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    serverVersion: row.serverVersion,
+    deletedAt: row.deletedAt,
+  };
+}
+
 /**
  * Patch-field allowlist per entity: only these keys map to columns on upsert.
  * `tagIds` is handled out-of-band (join table) for tasks, so it is NOT here.
@@ -114,4 +153,6 @@ export const upsertableColumns: Record<EntityType, readonly string[]> = {
   ],
   list: ['name', 'colorHex', 'icon', 'sortIndex', 'shareId'],
   tag: ['name', 'colorHex'],
+  reminder: ['taskId', 'kind', 'fireAt', 'offsetMinutes', 'region', 'interruption', 'notificationId'],
+  checklist: ['taskId', 'text', 'done', 'ord'],
 };

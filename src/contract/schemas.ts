@@ -333,10 +333,43 @@ export const TokenPairSchema = z
 export type TokenPair = z.infer<typeof TokenPairSchema>;
 
 // ============================================================================
+// Reminder + Checklist-item entities (synced; ApiSpec §5.1, §5.7)
+// ============================================================================
+
+export const ReminderCreateSchema = z
+  .object({
+    id: zUuid,
+    taskId: zUuid,
+    kind: z.number().int().min(0).max(3).default(0), // absolute|relativeToDue|location|recurring
+    fireAt: zTimestamp.nullable().default(null),
+    offsetMinutes: z.number().int().nullable().default(null),
+    region: z.record(z.unknown()).nullable().default(null),
+    interruption: z.number().int().min(0).max(3).default(1), // passive|active|timeSensitive|critical
+    notificationId: z.string().nullable().default(null),
+  })
+  .strict();
+export type ReminderCreate = z.infer<typeof ReminderCreateSchema>;
+export const ReminderPatchSchema = ReminderCreateSchema.partial().omit({ id: true });
+export type ReminderPatch = z.infer<typeof ReminderPatchSchema>;
+
+export const ChecklistItemCreateSchema = z
+  .object({
+    id: zUuid,
+    taskId: zUuid,
+    text: z.string().min(1),
+    done: z.boolean().default(false),
+    ord: z.number().int().default(0),
+  })
+  .strict();
+export type ChecklistItemCreate = z.infer<typeof ChecklistItemCreateSchema>;
+export const ChecklistItemPatchSchema = ChecklistItemCreateSchema.partial().omit({ id: true });
+export type ChecklistItemPatch = z.infer<typeof ChecklistItemPatchSchema>;
+
+// ============================================================================
 // Sync contract (ApiSpec §6)
 // ============================================================================
 
-export const zEntityType = z.enum(['task', 'list', 'tag']);
+export const zEntityType = z.enum(['task', 'list', 'tag', 'reminder', 'checklist']);
 export type EntityType = z.infer<typeof zEntityType>;
 
 export const zSyncOp = z.enum(['upsert', 'delete']);
@@ -427,4 +460,6 @@ export const patchSchemaByEntity = {
   task: TaskPatchSchema,
   list: TaskListPatchSchema,
   tag: TagPatchSchema,
+  reminder: ReminderPatchSchema,
+  checklist: ChecklistItemPatchSchema,
 } as const satisfies Record<EntityType, z.ZodTypeAny>;

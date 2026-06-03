@@ -291,3 +291,62 @@ describe('device registration (P1-B)', () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+describe('reminders + checklist items (P1-C, entity-agnostic sync)', () => {
+  it('round-trips a reminder and a checklist item through push/pull', async () => {
+    const a = await signIn('apple-user-A');
+    const taskId = randomUUID();
+    const reminderId = randomUUID();
+    const checklistId = randomUUID();
+    const now = new Date().toISOString();
+
+    // One batch, ordered: the parent task first (FK target), then its reminder + checklist item.
+    const res = await push(a.accessToken, [
+      { opId: randomUUID(), entityType: 'task', entityId: taskId, op: 'upsert',
+        baseVersion: 0, clientUpdatedAt: now, fields: { title: 'Parent task', status: 1, isAllDay: false } },
+      { opId: randomUUID(), entityType: 'reminder', entityId: reminderId, op: 'upsert',
+        baseVersion: 0, clientUpdatedAt: now, fields: { taskId, kind: 1, offsetMinutes: 30, interruption: 2 } },
+      { opId: randomUUID(), entityType: 'checklist', entityId: checklistId, op: 'upsert',
+        baseVersion: 0, clientUpdatedAt: now, fields: { taskId, text: 'sub-item one', done: false, ord: 0 } },
+    ]);
+    expect(res.json().results.map((r: { status: string }) => r.status)).toEqual(['applied', 'applied', 'applied']);
+
+    const changes = (await pull(a.accessToken)).json().changes;
+    const reminder = changes.find((c: { entityId: string }) => c.entityId === reminderId);
+    const checklist = changes.find((c: { entityId: string }) => c.entityId === checklistId);
+
+    expect(reminder.entityType).toBe('reminder');
+    expect(reminder.payload.taskId).toBe(taskId);
+    expect(reminder.payload.offsetMinutes).toBe(30);
+    expect(reminder.payload.interruption).toBe(2);
+
+    expect(checklist.entityType).toBe('checklist');
+    expect(checklist.payload.text).toBe('sub-item one');
+    expect(checklist.payload.done).toBe(false);
+  });
+
+  it('soft-deletes a checklist item (tombstone via sync)', async () => {
+    const a = await signIn('apple-user-A');
+    const taskId = randomUUID();
+    const checklistId = randomUUID();
+    const now = new Date().toISOString();
+
+    await push(a.accessToken, [
+      { opId: randomUUID(), entityType: 'task', entityId: taskId, op: 'upsert',
+        baseVersion: 0, clientUpdatedAt: now, fields: { title: 'T', isAllDay: false } },
+      { opId: randomUUID(), entityType: 'checklist', entityId: checklistId, op: 'upsert',
+        baseVersion: 0, clientUpdatedAt: now, fields: { taskId, text: 'item' } },
+    ]);
+
+    const del = await push(a.accessToken, [
+      { opId: randomUUID(), entityType: 'checklist', entityId: checklistId, op: 'delete',
+        baseVersion: 1, clientUpdatedAt: now, fields: {} },
+    ]);
+    expect(del.json().results[0].status).toBe('applied');
+
+    const mine = (await pull(a.accessToken)).json().changes.filter(
+      (c: { entityId: string }) => c.entityId === checklistId,
+    );
+    expect(mine[mine.length - 1].op).toBe('delete');
+  });
+});
