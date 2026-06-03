@@ -83,8 +83,17 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // Safety rail: this TRUNCATEs everything, so NEVER let the suite run against a
+  // non-local (e.g. managed/Neon) database. Point DATABASE_URL at local Postgres.
+  const url = process.env.DATABASE_URL ?? '';
+  if (!/@(localhost|127\.0\.0\.1)[:/]/.test(url)) {
+    throw new Error(
+      'Refusing to TRUNCATE: DATABASE_URL is not local. Run the integration suite against local ' +
+        'Postgres, e.g. DATABASE_URL=postgres://doit:doit@localhost:5432/doit npm run test:integration',
+    );
+  }
   await pool.query(
-    'TRUNCATE users, devices, refresh_tokens, task_lists, tags, tasks, task_tags, change_log, idempotency_keys RESTART IDENTITY CASCADE',
+    'TRUNCATE users, devices, refresh_tokens, task_lists, tags, tasks, task_tags, reminders, checklist_items, change_log, idempotency_keys RESTART IDENTITY CASCADE',
   );
 });
 

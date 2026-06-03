@@ -17,6 +17,14 @@
  */
 import { defineConfig } from 'drizzle-kit';
 
+// Load a local `.env` so `db:generate`/`db:migrate` pick up DATABASE_URL without
+// an inline var (no-op if absent — CI/prod pass DATABASE_URL in the environment).
+try {
+  process.loadEnvFile?.();
+} catch {
+  // no .env present — rely on the ambient environment
+}
+
 const url = process.env.DATABASE_URL;
 if (!url) {
   throw new Error('drizzle.config: DATABASE_URL is required to run drizzle-kit');

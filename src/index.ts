@@ -9,6 +9,7 @@ import { env } from '@/config/env.js';
 import { logger } from '@/lib/logger.js';
 import { buildApp } from '@/app.js';
 import { closeDb } from '@/db/client.js';
+import { closeRedis } from '@/redis/client.js';
 
 async function main(): Promise<void> {
   const app = await buildApp();
@@ -30,6 +31,7 @@ async function main(): Promise<void> {
     try {
       await app.close(); // stops accepting, drains in-flight + sockets
       await closeDb();
+      await closeRedis();
       logger.info('shutdown complete');
       process.exit(0);
     } catch (err) {

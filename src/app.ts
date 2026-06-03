@@ -23,6 +23,7 @@ import { logger } from '@/lib/logger.js';
 import { toErrorEnvelope, errors, AppError } from '@/lib/errors.js';
 import { systemClock, type Clock } from '@/lib/clock.js';
 import { pingDb } from '@/db/client.js';
+import { pingRedis } from '@/redis/client.js';
 import { authenticate } from '@/auth/middleware.js';
 import { registerAuthRoutes } from '@/auth/routes.js';
 import { registerSyncRoutes } from '@/modules/sync/routes.js';
@@ -102,13 +103,16 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   app.get('/health', async () => ({ status: 'ok' }));
 
   app.get('/ready', async (_request, reply) => {
-    const dbOk = await pingDb();
-    const ready = dbOk; // Redis is optional in Phase 0; not gating readiness.
+    const [dbOk, redisOk] = await Promise.all([
+      pingDb(),
+      redisEnabled ? pingRedis() : Promise.resolve(null),
+    ]);
+    const ready = dbOk; // DB gates readiness; Redis is reported but optional until Phase 5.
     const payload = {
       status: ready ? 'ready' : 'degraded',
       checks: {
         db: dbOk ? 'ok' : 'down',
-        redis: redisEnabled ? 'configured' : 'disabled',
+        redis: redisOk === null ? 'disabled' : redisOk ? 'ok' : 'down',
       },
     };
     reply.code(ready ? 200 : 503);
