@@ -19,9 +19,10 @@ import { db, type Tx, type Database } from '@/db/client.js';
 import type { TokenPair } from '@/contract/schemas.js';
 import * as repo from '@/auth/repository.js';
 
-// jose v5 returns Web Crypto `CryptoKey` (a global in Node 22+) from
-// importPKCS8/importSPKI. We alias it locally for readability.
-type Key = CryptoKey;
+// jose v5 returns a Web Crypto key from importPKCS8/importSPKI. Derive the type
+// from jose itself so we don't depend on the `CryptoKey` DOM global being in lib
+// (Node typings don't expose it without the DOM lib).
+type Key = Awaited<ReturnType<typeof importPKCS8>>;
 
 const ALG = 'ES256';
 const ISSUER = 'doit-api';

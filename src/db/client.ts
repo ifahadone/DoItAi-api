@@ -24,7 +24,10 @@ export const pool = new Pool({
   connectionTimeoutMillis: 10_000,
 });
 
-export const db: NodePgDatabase<typeof schema> = drizzle(pool, { schema });
+// `casing: 'snake_case'` maps camelCase model properties (createdAt, serverVersion,
+// appleSub, …) to the snake_case columns the migration created (created_at, …), so
+// runtime queries match the DDL. Keep this in sync with drizzle.config.ts.
+export const db: NodePgDatabase<typeof schema> = drizzle(pool, { schema, casing: 'snake_case' });
 
 export type Database = typeof db;
 /** A transaction handle as passed to Drizzle's `db.transaction(async (tx) => …)`. */

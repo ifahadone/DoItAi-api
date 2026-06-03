@@ -26,6 +26,9 @@ export default defineConfig({
   schema: './src/db/schema.ts',
   out: './drizzle',
   dialect: 'postgresql',
+  // camelCase model props → snake_case columns (matches src/db/client.ts), so
+  // `db:generate` emits snake_case DDL consistent with the runtime queries.
+  casing: 'snake_case',
   dbCredentials: { url },
   strict: true,
   verbose: true,

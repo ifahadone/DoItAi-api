@@ -9,6 +9,18 @@
  */
 import { z } from 'zod';
 
+// Load a local `.env` in non-production so `npm run dev`, tests, and one-off
+// scripts pick up config without a process manager. No-op if the file is absent
+// (production gets its environment from the platform's secret store). Runs before
+// we read process.env below.
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    process.loadEnvFile();
+  } catch {
+    // No .env present — rely on the ambient environment.
+  }
+}
+
 /** PEM keys may arrive with literal "\n" sequences (single-line env vars). Normalize. */
 const pem = () =>
   z

@@ -1,10 +1,12 @@
 {
   "compilerOptions": {
-    /* Language / module target — Node 22 LTS, native ESM */
-    "target": "ES2023",
+    /* Language / module target — Node 22 LTS, native ESM. ES2022 (not 2023) so
+       drizzle-kit's esbuild config loader accepts the target; the code uses no
+       ES2023-only APIs. */
+    "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2023"],
+    "lib": ["ES2022"],
 
     /* Strictness — every box ticked */
     "strict": true,

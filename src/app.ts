@@ -138,5 +138,10 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     { prefix: API_PREFIX },
   );
 
-  return app;
+  // Widen back to the documented return type. Passing a concrete pino
+  // `loggerInstance` specializes Fastify's logger generic; consumers want the
+  // general FastifyInstance. The cast is sound (pino's Logger satisfies
+  // FastifyBaseLogger at runtime) — the mismatch is only structural strictness
+  // under exactOptionalPropertyTypes.
+  return app as unknown as FastifyInstance;
 }
