@@ -366,7 +366,7 @@ The client flushes its outbox as a batch. Each op is independently idempotent.
       "status": "applied",            // applied | merged | conflict | rejected | duplicate
       "serverVersion": 5,
       "serverFields": null,           // present on 'merged': the fields the server kept
-      "committedSeq": 91432           // change_log seq, advances the pull cursor
+      "committedSeq": "91432"         // change_log seq (bigint as string), advances the pull cursor
     }
   ]
 }
@@ -393,8 +393,8 @@ Returns every change visible to the user since `cursor`, across all entity types
 {
   "changes": [
     { "entityType": "task", "entityId": "a3b4…", "op": "upsert", "version": 5,
-      "payload": { /* full row */ }, "seq": 91432 },
-    { "entityType": "task", "entityId": "9c10…", "op": "delete", "version": 3, "seq": 91440 }
+      "payload": { /* full row */ }, "seq": "91432" },
+    { "entityType": "task", "entityId": "9c10…", "op": "delete", "version": 3, "seq": "91440" }
   ],
   "nextCursor": "kFnAkQ==",          // base64(maxSeq); pass back next pull
   "hasMore": false                    // true ⇒ page again immediately
@@ -402,6 +402,8 @@ Returns every change visible to the user since `cursor`, across all entity types
 ```
 
 The cursor is opaque `base64(seq)`. A fresh client starts with no cursor → full snapshot (paged). The server caps `limit` at 500 and sets `hasMore` to drive paging. Because the cursor is a single monotonic `BIGSERIAL`, ordering is total and gap-free — no "missed a change" race.
+
+> **Wire types.** `seq` and `committedSeq` are PostgreSQL `BIGSERIAL` (bigint) values sent as JSON **strings** (e.g. `"committedSeq": "91432"`) so they stay precise past `2^53`; the client decodes them as strings. The `cursor`/`nextCursor` is an opaque `base64(seq)` token, also a string. `version`, `serverVersion`, and `baseVersion` remain JSON numbers.
 
 ### 6.3 Idempotency & retries
 
@@ -822,7 +824,7 @@ The client previews these fields; on confirm it creates the task locally and flu
 {
   "opId": "f1e2…", "entityId": "a3b4…", "status": "merged", "serverVersion": 9,
   "serverFields": { "title": "Lunch with Samir" },  // server kept a newer title…
-  "committedSeq": 91710                              // …client kept its newer scheduledStart
+  "committedSeq": "91710"                            // …client kept its newer scheduledStart
 }
 ```
 
