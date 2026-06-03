@@ -1,0 +1,44 @@
+name: CI
+
+# Typecheck + unit tests on every push/PR. No deploy credentials here — the
+# deploy step (ApiSpec §16) is added separately once a PaaS is chosen. Phase 0
+# unit tests (pure conflict resolver + contract round-trip) need NO database.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: typecheck + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+        env:
+          # Vitest Phase 0 suites are pure; these satisfy any incidental env reads.
+          NODE_ENV: test
+
+      - name: Build
+        run: npm run build
+
+  # Placeholder for Phase 1 integration tests against a real Postgres
+  # (Testcontainers / a service container). Intentionally omitted in Phase 0.

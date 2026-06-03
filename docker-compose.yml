@@ -1,0 +1,44 @@
+# Local dev dependencies (ApiSpec §16). Brings up Postgres 16 + Redis 7.
+# The API itself runs on the host via `npm run dev` (fast reload) — point
+# DATABASE_URL / REDIS_URL at these. Phase 0 needs only Postgres; Redis is here
+# for Phase 1+ and is safe to leave running.
+#
+#   docker compose up -d
+#   npm run db:migrate
+#   npm run dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: doit-postgres
+    environment:
+      POSTGRES_USER: doit
+      POSTGRES_PASSWORD: doit
+      POSTGRES_DB: doit
+    ports:
+      - "5432:5432"
+    volumes:
+      - doit_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U doit -d doit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: doit-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - doit_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  doit_pgdata:
+  doit_redisdata:
