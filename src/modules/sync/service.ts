@@ -22,6 +22,7 @@ import { tasks } from '@/db/schema.js';
 import { logger } from '@/lib/logger.js';
 import { decodeCursor, encodeCursor } from '@/lib/ids.js';
 import { memberIdsForList, roleOnList, roleAtLeast } from '@/modules/sharing/service.js';
+import { publishBump } from '@/realtime/bus.js';
 import {
   patchSchemaByEntity,
   type SyncPushOp,
@@ -121,8 +122,9 @@ async function processOp(
     return base({ status: 'rejected', reason: 'comments are not pushable; use POST /tasks/:id/comments' });
   }
 
+  const bump: { value: { users: string[]; seq: string } | null } = { value: null };
   try {
-    return await db.transaction(async (tx) => {
+    const committed = await db.transaction(async (tx) => {
       // 1) Idempotency — replay if we've already applied this opId.
       const prior = await repo.findIdempotent(op.opId, userId, tx);
       if (prior) {
@@ -251,6 +253,7 @@ async function processOp(
       }
 
       // 6) change_log append (captures the cursor seq).
+      const visible = await computeVisibility(op.entityType, op.entityId, ownerId, tx);
       const seq = await repo.appendChange(
         {
           entityType: op.entityType,
@@ -258,12 +261,13 @@ async function processOp(
           op: changeOp,
           version: newVersion,
           actorUserId: userId,
-          visibleUserIds: await computeVisibility(op.entityType, op.entityId, ownerId, tx),
+          visibleUserIds: visible,
           payload,
           nowIso: clock.nowIso(),
         },
         tx,
       );
+      bump.value = { users: visible, seq };
 
       const result = base({
         status: decision.status === 'merged' ? 'merged' : 'applied',
@@ -276,6 +280,12 @@ async function processOp(
       await repo.recordIdempotent(op.opId, userId, result, clock.nowIso(), tx);
       return result;
     });
+
+    // 8) Realtime nudge AFTER the commit (never on rollback): tell visible users to pull (§8).
+    if (bump.value && (committed.status === 'applied' || committed.status === 'merged')) {
+      void publishBump(bump.value.users, bump.value.seq);
+    }
+    return committed;
   } catch (err) {
     // Unexpected failure for THIS op only — surface as rejected, keep the batch.
     // Log server-side (no detail on the wire).

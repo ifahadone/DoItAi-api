@@ -37,6 +37,7 @@ import { registerBillingRoutes, registerBillingWebhook } from '@/modules/billing
 import { registerAccountRoutes } from '@/modules/account/routes.js';
 import { registerSharingRoutes } from '@/modules/sharing/routes.js';
 import { registerCommentRoutes } from '@/modules/comments/routes.js';
+import { registerWebSocketRoutes, registerWsTicketRoute } from '@/realtime/ws.js';
 import { buildOpenApiDocument } from '@/openapi/openapi.js';
 
 const API_PREFIX = '/api/v1';
@@ -154,6 +155,15 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       await registerAccountRoutes(instance);
       await registerSharingRoutes(instance);
       await registerCommentRoutes(instance);
+      await registerWsTicketRoute(instance);
+    },
+    { prefix: API_PREFIX },
+  );
+
+  // --- Realtime socket: /api/v1/ws (auth happens in the handler, not via the onRequest hook) -------
+  await app.register(
+    async (instance) => {
+      await registerWebSocketRoutes(instance);
     },
     { prefix: API_PREFIX },
   );
