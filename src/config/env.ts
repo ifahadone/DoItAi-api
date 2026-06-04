@@ -65,6 +65,9 @@ const EnvSchema = z
     APPLE_KEY_ID: z.string().optional(),
     APPLE_CLIENT_SECRET_PRIVATE_KEY: z.string().optional(),
     APPLE_STUB_VERIFICATION: boolish(false),
+    // Non-prod escape hatch: decode StoreKit transaction JWS WITHOUT verifying the Apple cert chain
+    // (mirrors APPLE_STUB_VERIFICATION). The loader hard-forbids it in production.
+    BILLING_STUB_VERIFICATION: boolish(false),
 
     // Anthropic (Phase 4) — the AI proxy. The key NEVER ships in the app (ApiSpec §9).
     // When unset, the AI endpoints fail closed (503 ai_unavailable) and the client uses its
@@ -87,6 +90,14 @@ const EnvSchema = z
         code: z.ZodIssueCode.custom,
         path: ['APPLE_STUB_VERIFICATION'],
         message: 'APPLE_STUB_VERIFICATION must be false when NODE_ENV=production',
+      });
+    }
+    // Same rail for billing: never trust unverified StoreKit transactions in production.
+    if (val.NODE_ENV === 'production' && val.BILLING_STUB_VERIFICATION === true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['BILLING_STUB_VERIFICATION'],
+        message: 'BILLING_STUB_VERIFICATION must be false when NODE_ENV=production',
       });
     }
   });

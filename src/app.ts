@@ -33,6 +33,7 @@ import { registerTagRoutes } from '@/modules/tags/routes.js';
 import { registerDeviceRoutes } from '@/modules/devices/routes.js';
 import { registerHabitRoutes } from '@/modules/habits/routes.js';
 import { registerAiRoutes } from '@/modules/ai/routes.js';
+import { registerBillingRoutes, registerBillingWebhook } from '@/modules/billing/routes.js';
 import { buildOpenApiDocument } from '@/openapi/openapi.js';
 
 const API_PREFIX = '/api/v1';
@@ -128,6 +129,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(
     async (instance) => {
       await registerAuthRoutes(instance);
+      // Apple's App Store Server Notifications V2 webhook — unauthenticated (trust = the JWS signature).
+      await registerBillingWebhook(instance);
     },
     { prefix: API_PREFIX },
   );
@@ -144,6 +147,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       await registerDeviceRoutes(instance);
       await registerHabitRoutes(instance);
       await registerAiRoutes(instance);
+      await registerBillingRoutes(instance);
     },
     { prefix: API_PREFIX },
   );

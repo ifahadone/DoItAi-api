@@ -390,6 +390,34 @@ export const aiUsage = pgTable(
   (t) => [index('ai_usage_owner_created_idx').on(t.ownerId, t.createdAt)],
 );
 
+// ============================================================================
+// subscriptions (StoreKit 2 entitlements; ApiSpec §12, AppSpec §17). The server
+// validates signed transactions and is the source of truth for the Pro
+// entitlement. One row per subscription, keyed by Apple's stable
+// `original_transaction_id`; renewals/refunds update `expires_at`/`revoked_at`.
+// Entitlement is DERIVED (active = not revoked AND expires_at in the future).
+// ============================================================================
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: uuid('id').primaryKey(),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id),
+    originalTransactionId: text('original_transaction_id').notNull().unique(),
+    latestTransactionId: text('latest_transaction_id').notNull(),
+    productId: text('product_id').notNull(),
+    purchaseAt: tsNull(),
+    expiresAt: tsNull(), // null for a non-renewing product
+    revokedAt: tsNull(), // set on refund/revoke
+    autoRenew: boolean('auto_renew').notNull().default(true),
+    environment: text('environment').notNull().default('Production'),
+    createdAt: tsNow(),
+    updatedAt: tsNow(),
+  },
+  (t) => [index('subscriptions_owner_idx').on(t.ownerId)],
+);
+
 // --- Inferred row types (handy in repositories/services) -------------------
 export type UserRow = typeof users.$inferSelect;
 export type DeviceRow = typeof devices.$inferSelect;
@@ -402,6 +430,7 @@ export type ChecklistItemRow = typeof checklistItems.$inferSelect;
 export type RoutineRow = typeof routines.$inferSelect;
 export type AlarmRow = typeof alarms.$inferSelect;
 export type AiUsageRow = typeof aiUsage.$inferSelect;
+export type SubscriptionRow = typeof subscriptions.$inferSelect;
 export type ChangeLogRow = typeof changeLog.$inferSelect;
 export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
 
@@ -419,6 +448,7 @@ export const schema = {
   routines,
   alarms,
   aiUsage,
+  subscriptions,
   changeLog,
   idempotencyKeys,
 };
