@@ -418,6 +418,65 @@ export const subscriptions = pgTable(
   (t) => [index('subscriptions_owner_idx').on(t.ownerId)],
 );
 
+// ============================================================================
+// Sharing & collaboration (ApiSpec §7.7, §8). A `share` makes a list collaborative;
+// `share_members` lists who's in it + their role; `invites` are tokenized join links.
+// Visibility fans out via change_log.visible_user_ids = the share's member set.
+// ============================================================================
+export const shares = pgTable(
+  'shares',
+  {
+    id: uuid('id').primaryKey(),
+    listId: uuid('list_id')
+      .notNull()
+      .references(() => taskLists.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: tsNow(),
+    deletedAt: tsNull(),
+  },
+  (t) => [index('shares_list_idx').on(t.listId), index('shares_owner_idx').on(t.ownerId)],
+);
+
+export const shareMembers = pgTable(
+  'share_members',
+  {
+    id: uuid('id').primaryKey(),
+    shareId: uuid('share_id')
+      .notNull()
+      .references(() => shares.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    role: text('role').notNull().default('editor'), // owner · editor · commenter · viewer
+    joinedAt: tsNow(),
+  },
+  (t) => [
+    uniqueIndex('share_members_unique').on(t.shareId, t.userId),
+    index('share_members_user_idx').on(t.userId),
+  ],
+);
+
+export const invites = pgTable(
+  'invites',
+  {
+    token: text('token').primaryKey(),
+    shareId: uuid('share_id')
+      .notNull()
+      .references(() => shares.id, { onDelete: 'cascade' }),
+    role: text('role').notNull().default('editor'),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    expiresAt: tsNull(),
+    revokedAt: tsNull(),
+    reportedAt: tsNull(),
+    createdAt: tsNow(),
+  },
+  (t) => [index('invites_share_idx').on(t.shareId)],
+);
+
 // --- Inferred row types (handy in repositories/services) -------------------
 export type UserRow = typeof users.$inferSelect;
 export type DeviceRow = typeof devices.$inferSelect;
@@ -431,6 +490,9 @@ export type RoutineRow = typeof routines.$inferSelect;
 export type AlarmRow = typeof alarms.$inferSelect;
 export type AiUsageRow = typeof aiUsage.$inferSelect;
 export type SubscriptionRow = typeof subscriptions.$inferSelect;
+export type ShareRow = typeof shares.$inferSelect;
+export type ShareMemberRow = typeof shareMembers.$inferSelect;
+export type InviteRow = typeof invites.$inferSelect;
 export type ChangeLogRow = typeof changeLog.$inferSelect;
 export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
 
@@ -449,6 +511,9 @@ export const schema = {
   alarms,
   aiUsage,
   subscriptions,
+  shares,
+  shareMembers,
+  invites,
   changeLog,
   idempotencyKeys,
 };

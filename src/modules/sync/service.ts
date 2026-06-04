@@ -15,10 +15,13 @@
  *
  * PULL: decode the opaque cursor, read visible deltas, encode nextCursor.
  */
+import { eq } from 'drizzle-orm';
 import type { Clock } from '@/lib/clock.js';
-import { db } from '@/db/client.js';
+import { db, type Tx } from '@/db/client.js';
+import { tasks } from '@/db/schema.js';
 import { logger } from '@/lib/logger.js';
 import { decodeCursor, encodeCursor } from '@/lib/ids.js';
+import { memberIdsForList, roleOnList, roleAtLeast } from '@/modules/sharing/service.js';
 import {
   patchSchemaByEntity,
   type SyncPushOp,
@@ -50,9 +53,46 @@ function validatePatch(
   return result.data as Record<string, unknown>;
 }
 
-/** Build the visible_user_ids for a change. Phase 0: owner only (no shares). */
-function visibleUserIds(ownerId: string): string[] {
-  return [ownerId];
+/**
+ * Build `visible_user_ids` for a change (ApiSpec §7.7 fan-out). Entities in a shared list become
+ * visible to every share member; everything else stays owner-only. Resolves the list from the
+ * post-write row (works for upsert + soft-delete), so members pull each other's changes via sync.
+ */
+async function computeVisibility(
+  entityType: EntityType,
+  entityId: string,
+  ownerId: string,
+  tx: Tx,
+): Promise<string[]> {
+  let listId: string | null = null;
+  if (entityType === 'list') {
+    listId = entityId;
+  } else if (entityType === 'task') {
+    const [row] = await tx.select({ listId: tasks.listId }).from(tasks).where(eq(tasks.id, entityId)).limit(1);
+    listId = row?.listId ?? null;
+  }
+  if (!listId) return [ownerId];
+  const members = await memberIdsForList(listId, tx);
+  return members.length > 1 ? members : [ownerId];
+}
+
+/** A non-owner may write to a shared task/list only with editor+ role (ApiSpec §7.7). */
+async function canEditSharedEntity(
+  entityType: EntityType,
+  entityId: string,
+  userId: string,
+  tx: Tx,
+): Promise<boolean> {
+  let listId: string | null = null;
+  if (entityType === 'list') {
+    listId = entityId;
+  } else if (entityType === 'task') {
+    const [row] = await tx.select({ listId: tasks.listId }).from(tasks).where(eq(tasks.id, entityId)).limit(1);
+    listId = row?.listId ?? null;
+  }
+  if (!listId) return false;
+  const role = await roleOnList(listId, userId, tx);
+  return role != null && roleAtLeast(role, 'editor');
 }
 
 /**
@@ -99,13 +139,17 @@ async function processOp(
         }
       }
 
-      // 3) Load current + authorize ownership.
+      // 3) Load current + authorize. The owner may always write; a non-owner may write only if they
+      //    are an editor+ member of the entity's shared list (ApiSpec §7.7 collaboration authZ).
+      //    Anyone else is rejected without confirming existence (cross-tenant isolation).
       const current = await repo.loadCurrent(op.entityType, op.entityId, tx);
       if (current.exists && current.ownerId !== userId) {
-        // Cross-tenant: never confirm existence. Reject the op.
-        const rejected = base({ status: 'rejected', reason: 'forbidden: not owner' });
-        await repo.recordIdempotent(op.opId, userId, rejected, clock.nowIso(), tx);
-        return rejected;
+        const allowed = await canEditSharedEntity(op.entityType, op.entityId, userId, tx);
+        if (!allowed) {
+          const rejected = base({ status: 'rejected', reason: 'forbidden: not owner' });
+          await repo.recordIdempotent(op.opId, userId, rejected, clock.nowIso(), tx);
+          return rejected;
+        }
       }
 
       // 4) Resolve (pure).
@@ -209,7 +253,7 @@ async function processOp(
           op: changeOp,
           version: newVersion,
           actorUserId: userId,
-          visibleUserIds: visibleUserIds(ownerId),
+          visibleUserIds: await computeVisibility(op.entityType, op.entityId, ownerId, tx),
           payload,
           nowIso: clock.nowIso(),
         },

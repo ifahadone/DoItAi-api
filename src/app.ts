@@ -35,6 +35,7 @@ import { registerHabitRoutes } from '@/modules/habits/routes.js';
 import { registerAiRoutes } from '@/modules/ai/routes.js';
 import { registerBillingRoutes, registerBillingWebhook } from '@/modules/billing/routes.js';
 import { registerAccountRoutes } from '@/modules/account/routes.js';
+import { registerSharingRoutes } from '@/modules/sharing/routes.js';
 import { buildOpenApiDocument } from '@/openapi/openapi.js';
 
 const API_PREFIX = '/api/v1';
@@ -150,6 +151,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       await registerAiRoutes(instance);
       await registerBillingRoutes(instance);
       await registerAccountRoutes(instance);
+      await registerSharingRoutes(instance);
     },
     { prefix: API_PREFIX },
   );
