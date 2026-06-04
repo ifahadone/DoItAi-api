@@ -13,7 +13,13 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '@/app.js';
 import { db, pool, closeDb } from '@/db/client.js';
 import { users, aiUsage } from '@/db/schema.js';
-import { setAiClient, type AiClient, type ToolCallRequest, type ToolCallResult } from '@/modules/ai/client.js';
+import {
+  setAiClient,
+  type AiClient,
+  type ToolCallRequest,
+  type ToolCallResult,
+  type StreamChunk,
+} from '@/modules/ai/client.js';
 
 async function stubAppleToken(sub: string): Promise<string> {
   return new SignJWT({ sub, email: `${sub}@example.com` })
@@ -73,10 +79,13 @@ async function consentedUser() {
   return { accessToken, userId };
 }
 
-/** Fake AI returning a canned parsed task; records the tool-call requests it received. */
+/** Fake AI returning a canned tool input and/or stream chunks; records the tool-call requests. */
 class FakeAiClient implements AiClient {
   readonly calls: ToolCallRequest[] = [];
-  constructor(private readonly input: unknown) {}
+  constructor(
+    private readonly input: unknown,
+    private readonly streamText: string[] = [],
+  ) {}
   async toolCall(req: ToolCallRequest): Promise<ToolCallResult> {
     this.calls.push(req);
     return {
@@ -84,8 +93,9 @@ class FakeAiClient implements AiClient {
       usage: { inputTokens: 30, outputTokens: 12, cacheReadTokens: 0, cacheCreationTokens: 0 },
     };
   }
-  async *stream(): AsyncIterable<never> {
-    throw new Error('not used');
+  async *stream(): AsyncIterable<StreamChunk> {
+    for (const t of this.streamText) yield { text: t };
+    yield { usage: { inputTokens: 50, outputTokens: 40, cacheReadTokens: 0, cacheCreationTokens: 0 } };
   }
 }
 
@@ -251,5 +261,52 @@ describe('POST /ai/routine-suggest', () => {
     const { accessToken } = await signIn(`u-${randomUUID()}`);
     const res = await post(accessToken, '/ai/routine-suggest', { tasks: [{ title: 'x' }] });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+describe('POST /ai/brief (SSE)', () => {
+  it('streams text deltas, a trailing highlights event, then [DONE]; meters usage', async () => {
+    const { accessToken, userId } = await consentedUser();
+    setAiClient(new FakeAiClient(null, ['Good morning. ', 'Focus on the board deck today.']));
+    const res = await post(accessToken, '/ai/brief', {
+      nowIso: '2026-06-04T08:00:00.000Z',
+      tasks: [
+        { title: 'Board deck', priority: 'p1', dueIso: '2026-06-04T17:00:00.000Z' },
+        { title: 'Old thing', priority: 'p3', dueIso: '2026-06-01T17:00:00.000Z' }, // overdue
+      ],
+      focusMinutesPlanned: 120,
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    // Narrative streamed as SSE text frames.
+    expect(res.body).toContain('"type":"text"');
+    expect(res.body).toContain('Focus on the board deck');
+    // Trailing structured highlights (deterministic): 2 tasks, 1 overdue.
+    expect(res.body).toContain('"type":"highlights"');
+    expect(res.body).toContain('"overdueCount":1');
+    expect(res.body).toContain('[DONE]');
+
+    const [{ n }] = await db
+      .select({ n: sql<string>`count(*)` })
+      .from(aiUsage)
+      .where(eq(aiUsage.ownerId, userId));
+    expect(Number(n)).toBe(1);
+  });
+});
+
+describe('POST /ai/review (SSE)', () => {
+  it('streams a review narrative + completion-rate highlights', async () => {
+    const { accessToken } = await consentedUser();
+    setAiClient(new FakeAiClient(null, ['You completed a lot this week. ', 'Keep protecting mornings.']));
+    const res = await post(accessToken, '/ai/review', {
+      completedCount: 18,
+      createdCount: 24,
+      focusMinutes: 300,
+      habits: [{ name: 'Read', streakCurrent: 5 }],
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    expect(res.body).toContain('Keep protecting mornings');
+    expect(res.body).toContain('"completionRatePct":75'); // 18/24
   });
 });

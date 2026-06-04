@@ -7,11 +7,12 @@
  * on-device/rules fallback (ApiSpec §9.6). AI never writes the data layer — it returns a proposal the
  * client previews and then writes via the normal `sync/push`.
  */
+import { Readable } from 'node:stream';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { requireUser } from '@/auth/middleware.js';
 import { parseOrThrow } from '@/lib/validate.js';
 import { errors } from '@/lib/errors.js';
-import { getAiClient, MODEL_BY_TIER, type AiClient } from './client.js';
+import { getAiClient, MODEL_BY_TIER, zeroUsage, type AiClient, type AiUsage } from './client.js';
 import { requireAiConsent, type ConsentedUser } from './consent.js';
 import { assertWithinBudget, recordUsage } from './usage.js';
 import { runStructured } from './structured.js';
@@ -25,6 +26,8 @@ import {
   SearchRequestSchema,
   RoutineSuggestionsSchema,
   RoutineSuggestRequestSchema,
+  BriefRequestSchema,
+  ReviewRequestSchema,
 } from './schemas.js';
 
 interface AiContext {
@@ -47,6 +50,51 @@ async function aiContext(request: FastifyRequest, nowIso: string): Promise<AiCon
 function requireClient(client: AiClient | null): AiClient {
   if (!client) throw errors.aiUnavailable('AI is not configured on the server');
   return client;
+}
+
+/** One SSE frame: `data: <json>\n\n`. */
+function sse(obj: unknown): string {
+  return `data: ${JSON.stringify(obj)}\n\n`;
+}
+
+/**
+ * Stream a model narrative as SSE (text deltas), then a trailing structured `highlights` event, then
+ * `[DONE]` (ApiSpec §9.5). Returns a Node Readable the route hands to Fastify to pipe. Usage is metered
+ * once the stream ends. Errors mid-stream emit an `error` frame and end cleanly so the client can fall
+ * back gracefully.
+ */
+function streamNarrative(args: {
+  client: AiClient;
+  tier: 'mid' | 'strong';
+  system: string;
+  userContent: string;
+  maxTokens: number;
+  highlights: unknown;
+  onDone: (usage: AiUsage) => Promise<void>;
+}): Readable {
+  const out = new Readable({ read() {} });
+  void (async () => {
+    let usage = zeroUsage();
+    try {
+      for await (const chunk of args.client.stream({
+        tier: args.tier,
+        system: args.system,
+        userContent: args.userContent,
+        maxTokens: args.maxTokens,
+      })) {
+        if (chunk.text) out.push(sse({ type: 'text', delta: chunk.text }));
+        if (chunk.usage) usage = chunk.usage;
+      }
+      out.push(sse({ type: 'highlights', highlights: args.highlights }));
+      out.push('data: [DONE]\n\n');
+    } catch {
+      out.push(sse({ type: 'error', message: 'AI stream failed; fall back to on-device' }));
+    } finally {
+      out.push(null);
+      await args.onDone(usage).catch(() => undefined);
+    }
+  })();
+  return out;
 }
 
 const PARSE_SYSTEM = [
@@ -87,6 +135,18 @@ const ROUTINE_SUGGEST_SYSTEM = [
   '(weekdays 1=Sun..7=Sat, OR everyNDays), and a confidence 0..1.',
   'Only suggest routines you are reasonably confident about. If nothing recurs, return an empty suggestions array.',
   'Return ONLY the emit_suggestions tool call.',
+].join('\n');
+
+const BRIEF_SYSTEM = [
+  "You write a short, encouraging morning brief for the user's day (3-5 sentences).",
+  'Mention what matters today: the most important or time-sensitive items, and a realistic focus.',
+  'Be warm and concrete, not generic. Do not list every task. Plain text, no markdown headers.',
+].join('\n');
+
+const REVIEW_SYSTEM = [
+  "You write a reflective weekly review of the user's productivity (one short paragraph + 2-3 suggestions).",
+  'Acknowledge what went well, name one pattern worth improving, and give specific, kind suggestions.',
+  'Ground it in the provided stats. Plain text, no markdown headers.',
 ].join('\n');
 
 export async function registerAiRoutes(app: FastifyInstance): Promise<void> {
@@ -209,5 +269,73 @@ export async function registerAiRoutes(app: FastifyInstance): Promise<void> {
     });
     await recordUsage(ctx.userId, 'routine-suggest', MODEL_BY_TIER.mid, usage, nowIso);
     return value; // { suggestions: [...] }
+  });
+
+  // POST /ai/brief — streamed morning brief + trailing highlights (mid tier, SSE). §9.5
+  app.post('/ai/brief', async (request, reply) => {
+    const nowIso = app.clock.nowIso();
+    const ctx = await aiContext(request, nowIso);
+    const client = requireClient(ctx.client);
+    const body = parseOrThrow(BriefRequestSchema, request.body);
+    const now = Date.parse(body.nowIso ?? nowIso);
+
+    const overdueCount = body.tasks.filter(
+      (t) => t.dueIso != null && Date.parse(t.dueIso) < now,
+    ).length;
+    const scheduledCount = body.tasks.filter((t) => t.scheduledStartIso != null).length;
+    const taskLines = body.tasks
+      .map((t) => `- ${t.title} [${t.priority}${t.dueIso ? `, due ${t.dueIso}` : ''}]`)
+      .join('\n');
+
+    reply.header('Content-Type', 'text/event-stream');
+    reply.header('Cache-Control', 'no-cache');
+    reply.header('X-Accel-Buffering', 'no');
+    return streamNarrative({
+      client,
+      tier: 'mid',
+      system: BRIEF_SYSTEM,
+      userContent:
+        `Current time: ${body.nowIso ?? nowIso}\n` +
+        `Planned focus: ${body.focusMinutesPlanned ?? 0} min\n` +
+        `Today's tasks (${body.tasks.length}):\n${taskLines || '- (none)'}`,
+      maxTokens: 700,
+      highlights: { taskCount: body.tasks.length, overdueCount, scheduledCount },
+      onDone: (usage) => recordUsage(ctx.userId, 'brief', MODEL_BY_TIER.mid, usage, nowIso),
+    });
+  });
+
+  // POST /ai/review — streamed weekly review + trailing highlights (strong tier, SSE). §9.5
+  app.post('/ai/review', async (request, reply) => {
+    const nowIso = app.clock.nowIso();
+    const ctx = await aiContext(request, nowIso);
+    const client = requireClient(ctx.client);
+    const body = parseOrThrow(ReviewRequestSchema, request.body);
+
+    const completionRatePct =
+      body.createdCount > 0 ? Math.round((body.completedCount / body.createdCount) * 100) : null;
+    const habitLines = (body.habits ?? []).map((h) => `- ${h.name}: ${h.streakCurrent}-day streak`).join('\n');
+
+    reply.header('Content-Type', 'text/event-stream');
+    reply.header('Cache-Control', 'no-cache');
+    reply.header('X-Accel-Buffering', 'no');
+    return streamNarrative({
+      client,
+      tier: 'strong',
+      system: REVIEW_SYSTEM,
+      userContent:
+        `Week starting: ${body.weekStartIso ?? 'this week'}\n` +
+        `Completed: ${body.completedCount} of ${body.createdCount} created\n` +
+        `Focus minutes: ${body.focusMinutes}\n` +
+        (body.topTags?.length ? `Top tags: ${body.topTags.join(', ')}\n` : '') +
+        (habitLines ? `Habits:\n${habitLines}` : ''),
+      maxTokens: 900,
+      highlights: {
+        completedCount: body.completedCount,
+        createdCount: body.createdCount,
+        focusMinutes: body.focusMinutes,
+        completionRatePct,
+      },
+      onDone: (usage) => recordUsage(ctx.userId, 'review', MODEL_BY_TIER.strong, usage, nowIso),
+    });
   });
 }

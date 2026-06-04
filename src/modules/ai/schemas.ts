@@ -127,3 +127,41 @@ export const RoutineSuggestRequestSchema = z
   })
   .strict();
 export type RoutineSuggestRequest = z.infer<typeof RoutineSuggestRequestSchema>;
+
+// --- /ai/brief : streamed morning brief + highlights (§9.5) ------------------
+export const BriefRequestSchema = z
+  .object({
+    nowIso: z.string().datetime().optional(),
+    tasks: z
+      .array(
+        z
+          .object({
+            title: z.string().max(500),
+            priority: PrioritySchema.default('none'),
+            dueIso: z.string().datetime().nullable().optional(),
+            scheduledStartIso: z.string().datetime().nullable().optional(),
+          })
+          .strict(),
+      )
+      .max(200)
+      .default([]),
+    focusMinutesPlanned: z.number().int().min(0).optional(),
+  })
+  .strict();
+export type BriefRequest = z.infer<typeof BriefRequestSchema>;
+
+// --- /ai/review : streamed weekly review + suggestions (§9.5) ----------------
+export const ReviewRequestSchema = z
+  .object({
+    weekStartIso: z.string().datetime().optional(),
+    completedCount: z.number().int().min(0).default(0),
+    createdCount: z.number().int().min(0).default(0),
+    focusMinutes: z.number().int().min(0).default(0),
+    topTags: z.array(z.string().max(120)).max(50).optional(),
+    habits: z
+      .array(z.object({ name: z.string().max(200), streakCurrent: z.number().int().min(0) }).strict())
+      .max(100)
+      .optional(),
+  })
+  .strict();
+export type ReviewRequest = z.infer<typeof ReviewRequestSchema>;
