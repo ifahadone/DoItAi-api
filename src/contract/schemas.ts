@@ -429,6 +429,7 @@ export const zEntityType = z.enum([
   'checklist',
   'routine',
   'alarm',
+  'comment',
 ]);
 export type EntityType = z.infer<typeof zEntityType>;
 
@@ -524,4 +525,7 @@ export const patchSchemaByEntity = {
   checklist: ChecklistItemPatchSchema,
   routine: RoutinePatchSchema,
   alarm: AlarmPatchSchema,
+  // Comments are created via REST (POST /tasks/:id/comments), never via sync push — this empty patch
+  // makes the type total; the sync commit also rejects 'comment' ops outright.
+  comment: z.object({}).strict(),
 } as const satisfies Record<EntityType, z.ZodTypeAny>;

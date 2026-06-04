@@ -477,6 +477,31 @@ export const invites = pgTable(
   (t) => [index('invites_share_idx').on(t.shareId)],
 );
 
+// ============================================================================
+// comments (activity feed on a task; ApiSpec §7.7, §8). Created via REST, not sync
+// push; each appends a change_log entry visible to the share members so it pulls
+// to everyone. `mentions` holds extracted @tokens (notifications are server-driven).
+// ============================================================================
+export const comments = pgTable(
+  'comments',
+  {
+    id: uuid('id').primaryKey(),
+    ownerId: uuid('owner_id') // the author
+      .notNull()
+      .references(() => users.id),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    mentions: jsonb('mentions'), // string[] of @tokens
+    createdAt: tsNow(),
+    updatedAt: tsNow(),
+    serverVersion: integer('server_version').notNull().default(1),
+    deletedAt: tsNull(),
+  },
+  (t) => [index('comments_task_idx').on(t.taskId)],
+);
+
 // --- Inferred row types (handy in repositories/services) -------------------
 export type UserRow = typeof users.$inferSelect;
 export type DeviceRow = typeof devices.$inferSelect;
@@ -493,6 +518,7 @@ export type SubscriptionRow = typeof subscriptions.$inferSelect;
 export type ShareRow = typeof shares.$inferSelect;
 export type ShareMemberRow = typeof shareMembers.$inferSelect;
 export type InviteRow = typeof invites.$inferSelect;
+export type CommentRow = typeof comments.$inferSelect;
 export type ChangeLogRow = typeof changeLog.$inferSelect;
 export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
 
@@ -514,6 +540,7 @@ export const schema = {
   shares,
   shareMembers,
   invites,
+  comments,
   changeLog,
   idempotencyKeys,
 };

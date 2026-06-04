@@ -116,6 +116,11 @@ async function processOp(
     ...over,
   });
 
+  // Comments are created via REST (POST /tasks/:id/comments), not sync push — reject defensively.
+  if (op.entityType === 'comment') {
+    return base({ status: 'rejected', reason: 'comments are not pushable; use POST /tasks/:id/comments' });
+  }
+
   try {
     return await db.transaction(async (tx) => {
       // 1) Idempotency — replay if we've already applied this opId.

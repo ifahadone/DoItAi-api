@@ -208,4 +208,5 @@ export const upsertableColumns: Record<EntityType, readonly string[]> = {
   // streakCurrent/streakLongest are server-owned (POST /habits/{id}/log) — NOT client-writable.
   routine: ['name', 'colorHex', 'anchorTime', 'recurrence', 'chained', 'isHabit', 'graceDays', 'steps'],
   alarm: ['taskId', 'fireAt', 'type', 'soundName', 'snoozeMinutes', 'usesLiveActivity'],
+  comment: [], // REST-only; never upserted via sync push
 };
