@@ -333,6 +333,7 @@ export const routines = pgTable('routines', {
   streakCurrent: integer('streak_current').notNull().default(0),
   streakLongest: integer('streak_longest').notNull().default(0),
   graceDays: integer('grace_days').notNull().default(0),
+  completions: jsonb('completions'), // ["YYYY-MM-DD", …] — server-owned (POST /habits/{id}/log)
   steps: jsonb('steps'), // [{ title, minutes, ord, hasAlarm }]
   createdAt: tsNow(),
   updatedAt: tsNow(),

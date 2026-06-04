@@ -145,6 +145,7 @@ export function routineRowToPayload(row: RoutineRow): Record<string, unknown> {
     streakCurrent: row.streakCurrent,
     streakLongest: row.streakLongest,
     graceDays: row.graceDays,
+    completions: row.completions ?? [],
     steps: row.steps ?? [],
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),

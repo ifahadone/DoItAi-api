@@ -31,6 +31,7 @@ import { registerTaskRoutes } from '@/modules/tasks/routes.js';
 import { registerListRoutes } from '@/modules/lists/routes.js';
 import { registerTagRoutes } from '@/modules/tags/routes.js';
 import { registerDeviceRoutes } from '@/modules/devices/routes.js';
+import { registerHabitRoutes } from '@/modules/habits/routes.js';
 import { buildOpenApiDocument } from '@/openapi/openapi.js';
 
 const API_PREFIX = '/api/v1';
@@ -140,6 +141,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       await registerListRoutes(instance);
       await registerTagRoutes(instance);
       await registerDeviceRoutes(instance);
+      await registerHabitRoutes(instance);
     },
     { prefix: API_PREFIX },
   );
