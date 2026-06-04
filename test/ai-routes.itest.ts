@@ -119,6 +119,32 @@ beforeEach(async () => {
   await pool.query('TRUNCATE users, devices, refresh_tokens, ai_usage RESTART IDENTITY CASCADE');
 });
 
+describe('AI consent flow', () => {
+  it('POST /ai/consent grants consent, unblocking the gated endpoints', async () => {
+    const { accessToken } = await signIn(`u-${randomUUID()}`);
+    // Before: blocked.
+    expect((await parse(accessToken, { text: 'x' })).statusCode).toBe(403);
+    // Grant via the endpoint (not a direct DB write).
+    const grant = await post(accessToken, '/ai/consent', { consent: true });
+    expect(grant.statusCode, grant.body).toBe(200);
+    expect(grant.json().aiConsent).toBe(true);
+    // After: parse works (with a fake model).
+    setAiClient(
+      new FakeAiClient({
+        title: 'x',
+        start: null,
+        durationMinutes: null,
+        due: null,
+        priority: 'none',
+        tags: [],
+        listHint: null,
+      }),
+    );
+    expect((await parse(accessToken, { text: 'x' })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/ai/consent', headers: { authorization: `Bearer ${accessToken}` } })).json().aiConsent).toBe(true);
+  });
+});
+
 describe('POST /ai/parse', () => {
   it('403 ai_consent_required when the user has not consented', async () => {
     const { accessToken } = await signIn(`u-${randomUUID()}`);

@@ -8,7 +8,11 @@
  * client previews and then writes via the normal `sync/push`.
  */
 import { Readable } from 'node:stream';
+import { z } from 'zod';
+import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { db } from '@/db/client.js';
+import { users } from '@/db/schema.js';
 import { requireUser } from '@/auth/middleware.js';
 import { parseOrThrow } from '@/lib/validate.js';
 import { errors } from '@/lib/errors.js';
@@ -149,7 +153,25 @@ const REVIEW_SYSTEM = [
   'Ground it in the provided stats. Plain text, no markdown headers.',
 ].join('\n');
 
+const ConsentSchema = z.object({ consent: z.boolean() }).strict();
+
 export async function registerAiRoutes(app: FastifyInstance): Promise<void> {
+  // GET/POST /ai/consent — read/set the AI opt-in (ApiSpec §9.6; the spec's PATCH /me consent setting).
+  // NOT consent-gated — this is how the user grants/revokes consent in the first place.
+  app.get('/ai/consent', async (request) => {
+    const { id: userId } = requireUser(request);
+    const [row] = await db.select({ aiConsent: users.aiConsent }).from(users).where(eq(users.id, userId)).limit(1);
+    if (!row) throw errors.notFound('User not found');
+    return { aiConsent: row.aiConsent };
+  });
+
+  app.post('/ai/consent', async (request) => {
+    const { id: userId } = requireUser(request);
+    const body = parseOrThrow(ConsentSchema, request.body);
+    await db.update(users).set({ aiConsent: body.consent }).where(eq(users.id, userId));
+    return { aiConsent: body.consent };
+  });
+
   // POST /ai/parse — NL quick-add → task fields (fast tier, structured tool call). §9.2
   app.post('/ai/parse', async (request) => {
     const nowIso = app.clock.nowIso();
