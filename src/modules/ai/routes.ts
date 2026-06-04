@@ -21,6 +21,10 @@ import {
   ParseRequestSchema,
   ScheduleRequestSchema,
   RankingSchema,
+  SearchFilterSchema,
+  SearchRequestSchema,
+  RoutineSuggestionsSchema,
+  RoutineSuggestRequestSchema,
 } from './schemas.js';
 
 interface AiContext {
@@ -64,6 +68,25 @@ const SCHEDULE_SYSTEM = [
   'Honor the intent (e.g. "mornings for deep work" ⇒ put deep-focus tasks first so they land earliest).',
   'You do NOT assign times; a deterministic solver places them into free slots afterward.',
   'Include every provided id exactly once. Return ONLY the rank_tasks tool call.',
+].join('\n');
+
+const SEARCH_SYSTEM = [
+  'You convert a natural-language task search into a structured filter the app runs locally.',
+  '- text: the free-text to match (title/notes), or null if the query is fully captured by the other fields.',
+  '- priorities: any priorities the query implies (e.g. "urgent"→["p1"]); else [].',
+  '- tags: bare tag names mentioned; else [].',
+  '- listHint: a list name if the query names one, else null.',
+  '- dueBefore/dueAfter: ISO datetimes if the query implies a window (resolve relative dates against the current time); else null.',
+  '- includeCompleted: true only if the query asks for done/completed items.',
+  'Return ONLY the emit_filter tool call.',
+].join('\n');
+
+const ROUTINE_SUGGEST_SYSTEM = [
+  'You look at a list of recently completed tasks and detect recurring patterns worth turning into a routine.',
+  'For each strong pattern, suggest a routine: a name, ordered steps (title + estimated minutes), a recurrence',
+  '(weekdays 1=Sun..7=Sat, OR everyNDays), and a confidence 0..1.',
+  'Only suggest routines you are reasonably confident about. If nothing recurs, return an empty suggestions array.',
+  'Return ONLY the emit_suggestions tool call.',
 ].join('\n');
 
 export async function registerAiRoutes(app: FastifyInstance): Promise<void> {
@@ -143,5 +166,48 @@ export async function registerAiRoutes(app: FastifyInstance): Promise<void> {
       order,
     });
     return { ...plan, ranked: order !== undefined };
+  });
+
+  // POST /ai/search — NL query → a structured filter the client runs locally (fast tier). §9.1
+  app.post('/ai/search', async (request) => {
+    const nowIso = app.clock.nowIso();
+    const ctx = await aiContext(request, nowIso);
+    const client = requireClient(ctx.client);
+    const body = parseOrThrow(SearchRequestSchema, request.body);
+
+    const { value, usage } = await runStructured(client, {
+      tier: 'fast',
+      system: SEARCH_SYSTEM,
+      toolName: 'emit_filter',
+      toolDescription: 'Emit the structured filter for the search query.',
+      schema: SearchFilterSchema,
+      userContent: `Current time: ${body.nowIso ?? nowIso}\nQuery: ${body.query}`,
+      maxTokens: 384,
+    });
+    await recordUsage(ctx.userId, 'search', MODEL_BY_TIER.fast, usage, nowIso);
+    return { filter: value };
+  });
+
+  // POST /ai/routine-suggest — detect repeated tasks → routine suggestions (mid tier). §9.1
+  app.post('/ai/routine-suggest', async (request) => {
+    const nowIso = app.clock.nowIso();
+    const ctx = await aiContext(request, nowIso);
+    const client = requireClient(ctx.client);
+    const body = parseOrThrow(RoutineSuggestRequestSchema, request.body);
+
+    const taskLines = body.tasks
+      .map((t) => `- ${t.title}${t.completedAtIso ? ` (done ${t.completedAtIso})` : ''}`)
+      .join('\n');
+    const { value, usage } = await runStructured(client, {
+      tier: 'mid',
+      system: ROUTINE_SUGGEST_SYSTEM,
+      toolName: 'emit_suggestions',
+      toolDescription: 'Emit zero or more routine suggestions mined from the tasks.',
+      schema: RoutineSuggestionsSchema,
+      userContent: `Recent tasks:\n${taskLines}`,
+      maxTokens: 1024,
+    });
+    await recordUsage(ctx.userId, 'routine-suggest', MODEL_BY_TIER.mid, usage, nowIso);
+    return value; // { suggestions: [...] }
   });
 }

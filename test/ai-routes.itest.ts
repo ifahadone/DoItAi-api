@@ -58,6 +58,15 @@ function schedule(token: string, payload: unknown) {
   });
 }
 
+function post(token: string, path: string, payload: unknown) {
+  return app.inject({
+    method: 'POST',
+    url: `/api/v1${path}`,
+    headers: { authorization: `Bearer ${token}` },
+    payload,
+  });
+}
+
 async function consentedUser() {
   const { accessToken, userId } = await signIn(`u-${randomUUID()}`);
   await db.update(users).set({ aiConsent: true }).where(eq(users.id, userId));
@@ -191,5 +200,56 @@ describe('POST /ai/schedule', () => {
       .from(aiUsage)
       .where(eq(aiUsage.ownerId, userId));
     expect(Number(n)).toBe(1);
+  });
+});
+
+describe('POST /ai/search', () => {
+  it('returns a structured filter for the client to run locally', async () => {
+    const { accessToken } = await consentedUser();
+    setAiClient(
+      new FakeAiClient({
+        text: 'report',
+        priorities: ['p1'],
+        tags: ['work'],
+        listHint: null,
+        dueBefore: null,
+        dueAfter: null,
+        includeCompleted: false,
+      }),
+    );
+    const res = await post(accessToken, '/ai/search', { query: 'urgent work reports' });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().filter.priorities).toEqual(['p1']);
+    expect(res.json().filter.includeCompleted).toBe(false);
+  });
+});
+
+describe('POST /ai/routine-suggest', () => {
+  it('returns routine suggestions mined from recent tasks', async () => {
+    const { accessToken } = await consentedUser();
+    setAiClient(
+      new FakeAiClient({
+        suggestions: [
+          {
+            name: 'Morning standup prep',
+            steps: [{ title: 'Review board', minutes: 10 }],
+            recurrence: { weekdays: [2, 3, 4, 5, 6], everyNDays: null },
+            confidence: 0.8,
+          },
+        ],
+      }),
+    );
+    const res = await post(accessToken, '/ai/routine-suggest', {
+      tasks: [{ title: 'Standup prep' }, { title: 'Standup prep' }],
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().suggestions).toHaveLength(1);
+    expect(res.json().suggestions[0].name).toBe('Morning standup prep');
+  });
+
+  it('403 without consent', async () => {
+    const { accessToken } = await signIn(`u-${randomUUID()}`);
+    const res = await post(accessToken, '/ai/routine-suggest', { tasks: [{ title: 'x' }] });
+    expect(res.statusCode).toBe(403);
   });
 });
