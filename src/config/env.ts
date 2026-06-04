@@ -66,8 +66,12 @@ const EnvSchema = z
     APPLE_CLIENT_SECRET_PRIVATE_KEY: z.string().optional(),
     APPLE_STUB_VERIFICATION: boolish(false),
 
-    // Anthropic (Phase 4)
+    // Anthropic (Phase 4) — the AI proxy. The key NEVER ships in the app (ApiSpec §9).
+    // When unset, the AI endpoints fail closed (503 ai_unavailable) and the client uses its
+    // on-device/rules fallback — the whole feature degrades gracefully (ApiSpec §9.6).
     ANTHROPIC_API_KEY: z.string().optional(),
+    // Per-user monthly output+input token budget for AI (ApiSpec §9.6). Over budget ⇒ 429.
+    AI_MONTHLY_TOKEN_BUDGET: z.coerce.number().int().positive().default(2_000_000),
 
     // APNs (Phase 1+)
     APNS_KEY_ID: z.string().optional(),

@@ -29,6 +29,13 @@
       "when": 1749300000000,
       "tag": "0003_routine_completions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1749400000000,
+      "tag": "0004_ai_usage",
+      "breakpoints": true
     }
   ]
 }

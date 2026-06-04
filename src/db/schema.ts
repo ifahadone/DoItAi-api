@@ -367,6 +367,29 @@ export const alarms = pgTable(
   (t) => [index('alarms_task_idx').on(t.taskId)],
 );
 
+// ============================================================================
+// ai_usage (AI proxy metering; ApiSpec §9.6). NOT a synced entity — it's
+// server-internal cost/consent accounting. One row per AI call, used to enforce
+// the per-user monthly token budget and to audit cache-hit rates.
+// ============================================================================
+export const aiUsage = pgTable(
+  'ai_usage',
+  {
+    id: uuid('id').primaryKey(),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id),
+    endpoint: text('endpoint').notNull(), // 'parse' | 'schedule' | 'brief' | 'review' | 'search' | 'routine-suggest'
+    model: text('model').notNull(),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+    cacheCreationTokens: integer('cache_creation_tokens').notNull().default(0),
+    createdAt: tsNow(),
+  },
+  (t) => [index('ai_usage_owner_created_idx').on(t.ownerId, t.createdAt)],
+);
+
 // --- Inferred row types (handy in repositories/services) -------------------
 export type UserRow = typeof users.$inferSelect;
 export type DeviceRow = typeof devices.$inferSelect;
@@ -378,6 +401,7 @@ export type ReminderRow = typeof reminders.$inferSelect;
 export type ChecklistItemRow = typeof checklistItems.$inferSelect;
 export type RoutineRow = typeof routines.$inferSelect;
 export type AlarmRow = typeof alarms.$inferSelect;
+export type AiUsageRow = typeof aiUsage.$inferSelect;
 export type ChangeLogRow = typeof changeLog.$inferSelect;
 export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
 
@@ -394,6 +418,7 @@ export const schema = {
   checklistItems,
   routines,
   alarms,
+  aiUsage,
   changeLog,
   idempotencyKeys,
 };

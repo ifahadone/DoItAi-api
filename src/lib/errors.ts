@@ -19,6 +19,7 @@ export const ErrorCode = {
   gone: 'gone',
   ai_consent_required: 'ai_consent_required',
   ai_budget_exceeded: 'ai_budget_exceeded',
+  ai_unavailable: 'ai_unavailable',
   rate_limited: 'rate_limited',
   internal: 'internal',
 } as const;
@@ -35,6 +36,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   gone: 410,
   ai_consent_required: 403,
   ai_budget_exceeded: 429,
+  ai_unavailable: 503,
   rate_limited: 429,
   internal: 500,
 };
@@ -98,6 +100,12 @@ export const errors = {
   conflict: (message = 'Conflict', details?: unknown) =>
     new AppError(ErrorCode.conflict, message, { details }),
   gone: (message = 'Gone') => new AppError(ErrorCode.gone, message),
+  aiConsentRequired: (message = 'AI features require consent') =>
+    new AppError(ErrorCode.ai_consent_required, message),
+  aiBudgetExceeded: (message = 'Monthly AI budget exceeded') =>
+    new AppError(ErrorCode.ai_budget_exceeded, message),
+  aiUnavailable: (message = 'AI is unavailable; fall back to on-device/manual', details?: unknown) =>
+    new AppError(ErrorCode.ai_unavailable, message, { details }),
   rateLimited: (message = 'Rate limited') => new AppError(ErrorCode.rate_limited, message),
   internal: (message = 'Internal server error', cause?: unknown) =>
     new AppError(ErrorCode.internal, message, { cause }),
