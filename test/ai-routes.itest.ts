@@ -49,6 +49,21 @@ function parse(token: string, payload: unknown) {
   });
 }
 
+function schedule(token: string, payload: unknown) {
+  return app.inject({
+    method: 'POST',
+    url: '/api/v1/ai/schedule',
+    headers: { authorization: `Bearer ${token}` },
+    payload,
+  });
+}
+
+async function consentedUser() {
+  const { accessToken, userId } = await signIn(`u-${randomUUID()}`);
+  await db.update(users).set({ aiConsent: true }).where(eq(users.id, userId));
+  return { accessToken, userId };
+}
+
 /** Fake AI returning a canned parsed task; records the tool-call requests it received. */
 class FakeAiClient implements AiClient {
   readonly calls: ToolCallRequest[] = [];
@@ -136,5 +151,45 @@ describe('POST /ai/parse', () => {
     setAiClient(new FakeAiClient({}));
     const res = await parse(accessToken, { text: '' }); // empty text fails min(1)
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('POST /ai/schedule', () => {
+  const freeSlots = [{ startIso: '2026-06-04T09:00:00.000Z', endIso: '2026-06-04T17:00:00.000Z' }];
+  const tasks = [
+    { id: 'a', title: 'Email', durationMinutes: 30, priority: 'p4' as const },
+    { id: 'b', title: 'Deep work', durationMinutes: 90, priority: 'p1' as const },
+  ];
+
+  it('rules-only path works WITHOUT an API key (graceful degradation)', async () => {
+    const { accessToken } = await consentedUser();
+    setAiClient(null); // no model configured
+    const res = await schedule(accessToken, { tasks, freeSlots, bufferMinutes: 0 }); // no intent
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json();
+    expect(body.ranked).toBe(false);
+    // Default order is priority-desc: b (p1) before a (p4).
+    expect(body.blocks.map((x: { taskId: string }) => x.taskId)).toEqual(['b', 'a']);
+  });
+
+  it('AI-ranked path uses the model order, then the solver places + meters usage', async () => {
+    const { accessToken, userId } = await consentedUser();
+    setAiClient(new FakeAiClient({ order: ['a', 'b'] })); // model says do 'a' first despite lower priority
+    const res = await schedule(accessToken, {
+      tasks,
+      freeSlots,
+      bufferMinutes: 0,
+      intent: 'clear quick wins first',
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json();
+    expect(body.ranked).toBe(true);
+    expect(body.blocks.map((x: { taskId: string }) => x.taskId)).toEqual(['a', 'b']);
+
+    const [{ n }] = await db
+      .select({ n: sql<string>`count(*)` })
+      .from(aiUsage)
+      .where(eq(aiUsage.ownerId, userId));
+    expect(Number(n)).toBe(1);
   });
 });

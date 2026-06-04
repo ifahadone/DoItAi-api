@@ -32,3 +32,34 @@ export const ParseRequestSchema = z
   })
   .strict();
 export type ParseRequest = z.infer<typeof ParseRequestSchema>;
+
+// --- /ai/schedule : AI ranks intent, the solver places (§9.3) ----------------
+export const PrioritySchema = z.enum(['none', 'p4', 'p3', 'p2', 'p1']);
+
+export const ScheduleTaskSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string(),
+    durationMinutes: z.number().int().positive(),
+    priority: PrioritySchema.default('none'),
+    dueIso: z.string().datetime().nullable().optional(),
+  })
+  .strict();
+
+export const TimeSlotSchema = z
+  .object({ startIso: z.string().datetime(), endIso: z.string().datetime() })
+  .strict();
+
+export const ScheduleRequestSchema = z
+  .object({
+    tasks: z.array(ScheduleTaskSchema).min(1).max(100),
+    freeSlots: z.array(TimeSlotSchema).max(100),
+    bufferMinutes: z.number().int().min(0).max(120).default(5),
+    /** Free-text scheduling intent ("mornings for deep work"). Empty ⇒ pure rules (no model call). */
+    intent: z.string().max(500).optional(),
+  })
+  .strict();
+export type ScheduleRequest = z.infer<typeof ScheduleRequestSchema>;
+
+/** The AI ranking tool output: task ids in the order the model recommends attempting placement. */
+export const RankingSchema = z.object({ order: z.array(z.string()) }).strict();

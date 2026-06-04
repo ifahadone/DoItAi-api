@@ -15,24 +15,34 @@ import { getAiClient, MODEL_BY_TIER, type AiClient } from './client.js';
 import { requireAiConsent, type ConsentedUser } from './consent.js';
 import { assertWithinBudget, recordUsage } from './usage.js';
 import { runStructured } from './structured.js';
-import { ParsedTaskSchema, ParseRequestSchema } from './schemas.js';
+import { solveSchedule, type SolverTask } from './solver.js';
+import {
+  ParsedTaskSchema,
+  ParseRequestSchema,
+  ScheduleRequestSchema,
+  RankingSchema,
+} from './schemas.js';
 
 interface AiContext {
   userId: string;
   user: ConsentedUser;
-  client: AiClient;
+  /** Null when no API key is configured. Endpoints that always call the model throw; those with a
+   *  rules-only path (schedule without intent) proceed without it. */
+  client: AiClient | null;
 }
 
-/** The shared guard: auth + consent + budget + a configured client (else fail closed). */
+/** The shared guard: auth + consent + budget. (The client is nullable — see `AiContext`.) */
 async function aiContext(request: FastifyRequest, nowIso: string): Promise<AiContext> {
   const { id: userId } = requireUser(request);
   const user = await requireAiConsent(userId);
   await assertWithinBudget(userId, nowIso);
-  const client = getAiClient();
-  if (!client) {
-    throw errors.aiUnavailable('AI is not configured on the server');
-  }
-  return { userId, user, client };
+  return { userId, user, client: getAiClient() };
+}
+
+/** Assert a configured client, else fail closed (503) so the app uses its on-device/rules fallback. */
+function requireClient(client: AiClient | null): AiClient {
+  if (!client) throw errors.aiUnavailable('AI is not configured on the server');
+  return client;
 }
 
 const PARSE_SYSTEM = [
@@ -48,11 +58,21 @@ const PARSE_SYSTEM = [
   'Return ONLY the emit_task tool call. Do not write prose.',
 ].join('\n');
 
+const SCHEDULE_SYSTEM = [
+  'You rank a list of tasks for the day given the user\'s scheduling intent.',
+  'Return the task ids in the order they should be attempted for placement — most-preferred first.',
+  'Honor the intent (e.g. "mornings for deep work" ⇒ put deep-focus tasks first so they land earliest).',
+  'You do NOT assign times; a deterministic solver places them into free slots afterward.',
+  'Include every provided id exactly once. Return ONLY the rank_tasks tool call.',
+].join('\n');
+
 export async function registerAiRoutes(app: FastifyInstance): Promise<void> {
   // POST /ai/parse — NL quick-add → task fields (fast tier, structured tool call). §9.2
   app.post('/ai/parse', async (request) => {
     const nowIso = app.clock.nowIso();
-    const { userId, client } = await aiContext(request, nowIso);
+    const ctx = await aiContext(request, nowIso);
+    const client = requireClient(ctx.client);
+    const userId = ctx.userId;
     const body = parseOrThrow(ParseRequestSchema, request.body);
 
     const stableContextParts: string[] = [];
@@ -77,5 +97,51 @@ export async function registerAiRoutes(app: FastifyInstance): Promise<void> {
 
     await recordUsage(userId, 'parse', MODEL_BY_TIER.fast, usage, nowIso);
     return { task: value };
+  });
+
+  // POST /ai/schedule — AI ranks intent, the deterministic solver places (§9.3). With no intent, it
+  // skips the model entirely and returns a pure rules-based plan (graceful degradation).
+  app.post('/ai/schedule', async (request) => {
+    const nowIso = app.clock.nowIso();
+    const { userId, client } = await aiContext(request, nowIso);
+    const body = parseOrThrow(ScheduleRequestSchema, request.body);
+
+    const solverTasks: SolverTask[] = body.tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      durationMinutes: t.durationMinutes,
+      priority: t.priority,
+      dueIso: t.dueIso ?? null,
+    }));
+
+    let order: string[] | undefined;
+    const intent = body.intent?.trim();
+    if (intent) {
+      const aiClient = requireClient(client);
+      const taskLines = body.tasks
+        .map((t) => `- ${t.id}: "${t.title}" (${t.priority}${t.dueIso ? `, due ${t.dueIso}` : ''})`)
+        .join('\n');
+      const { value, usage } = await runStructured(aiClient, {
+        tier: 'mid',
+        system: SCHEDULE_SYSTEM,
+        toolName: 'rank_tasks',
+        toolDescription: 'Emit the task ids in the recommended placement order.',
+        schema: RankingSchema,
+        userContent: `Intent: ${intent}\n\nTasks:\n${taskLines}`,
+        maxTokens: 512,
+      });
+      // Keep only known ids (the solver re-appends any the model dropped, by its default key).
+      const known = new Set(body.tasks.map((t) => t.id));
+      order = value.order.filter((id) => known.has(id));
+      await recordUsage(userId, 'schedule', MODEL_BY_TIER.mid, usage, nowIso);
+    }
+
+    const plan = solveSchedule({
+      tasks: solverTasks,
+      freeSlots: body.freeSlots,
+      bufferMinutes: body.bufferMinutes,
+      order,
+    });
+    return { ...plan, ranked: order !== undefined };
   });
 }
