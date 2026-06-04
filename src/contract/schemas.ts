@@ -366,10 +366,70 @@ export const ChecklistItemPatchSchema = ChecklistItemCreateSchema.partial().omit
 export type ChecklistItemPatch = z.infer<typeof ChecklistItemPatchSchema>;
 
 // ============================================================================
+// Routine + Alarm entities (synced; ApiSpec §5.2, §5.6, §7.4–§7.5)
+// ============================================================================
+
+/** One embedded routine step. */
+export const RoutineStepSchema = z
+  .object({
+    title: z.string().default(''),
+    minutes: z.number().int().nonnegative().default(0),
+    ord: z.number().int().default(0),
+    hasAlarm: z.boolean().default(false),
+  })
+  .strict();
+export type RoutineStep = z.infer<typeof RoutineStepSchema>;
+
+/**
+ * A routine template (or, with `isHabit: true`, a tracked habit). Streak fields are NOT writable
+ * here — the server owns streak math (POST /habits/{id}/log); they round-trip in the row payload only.
+ */
+export const RoutineCreateSchema = z
+  .object({
+    id: zUuid,
+    name: z.string().default(''),
+    colorHex: z.string().default('#4F46E5'),
+    anchorTime: z.string().nullable().default(null), // "HH:mm" wall-clock
+    recurrence: z.record(z.unknown()).nullable().default(null), // { weekdays | days | everyNDays }
+    chained: z.boolean().default(false),
+    isHabit: z.boolean().default(false),
+    graceDays: z.number().int().nonnegative().default(0),
+    steps: z.array(RoutineStepSchema).default([]),
+  })
+  .strict();
+export type RoutineCreate = z.infer<typeof RoutineCreateSchema>;
+export const RoutinePatchSchema = RoutineCreateSchema.partial().omit({ id: true });
+export type RoutinePatch = z.infer<typeof RoutinePatchSchema>;
+
+/** A time-critical alarm (the client owns delivery; ApiSpec §5.6). */
+export const AlarmCreateSchema = z
+  .object({
+    id: zUuid,
+    taskId: zUuid.nullable().default(null),
+    fireAt: zTimestamp.nullable().default(null),
+    type: z.number().int().min(0).max(3).default(0), // wake|taskStart|routineStep|leaveBy
+    soundName: z.string().nullable().default(null),
+    snoozeMinutes: z.number().int().nullable().default(null),
+    usesLiveActivity: z.boolean().default(false),
+  })
+  .strict();
+export type AlarmCreate = z.infer<typeof AlarmCreateSchema>;
+export const AlarmPatchSchema = AlarmCreateSchema.partial().omit({ id: true });
+export type AlarmPatch = z.infer<typeof AlarmPatchSchema>;
+
+// ============================================================================
 // Sync contract (ApiSpec §6)
 // ============================================================================
 
-export const zEntityType = z.enum(['task', 'list', 'tag', 'reminder', 'checklist']);
+export const zEntityType = z.enum([
+  'task',
+  'list',
+  'tag',
+  'reminder',
+  'checklist',
+  'routine',
+  'alarm',
+]);
 export type EntityType = z.infer<typeof zEntityType>;
 
 export const zSyncOp = z.enum(['upsert', 'delete']);
@@ -462,4 +522,6 @@ export const patchSchemaByEntity = {
   tag: TagPatchSchema,
   reminder: ReminderPatchSchema,
   checklist: ChecklistItemPatchSchema,
+  routine: RoutinePatchSchema,
+  alarm: AlarmPatchSchema,
 } as const satisfies Record<EntityType, z.ZodTypeAny>;

@@ -313,6 +313,59 @@ export const checklistItems = pgTable(
   (t) => [index('checklist_items_task_idx').on(t.taskId)],
 );
 
+// ============================================================================
+// routines (recurring step templates + habits; ApiSpec §5.2, §7.4). `is_habit`
+// distinguishes a single tracked habit from a multi-step routine. Steps are
+// embedded JSON ([{ title, minutes, ord, hasAlarm }]) — no separate table.
+// Server is authoritative for streak math (POST /habits/{id}/log).
+// ============================================================================
+export const routines = pgTable('routines', {
+  id: uuid('id').primaryKey(),
+  ownerId: uuid('owner_id')
+    .notNull()
+    .references(() => users.id),
+  name: text('name').notNull().default(''),
+  colorHex: text('color_hex').notNull().default('#4F46E5'),
+  anchorTime: text('anchor_time'), // wall-clock "06:30"; materialized client-side (DST-safe)
+  recurrence: jsonb('recurrence'), // { weekdays | days | everyNDays }
+  chained: boolean('chained').notNull().default(false),
+  isHabit: boolean('is_habit').notNull().default(false),
+  streakCurrent: integer('streak_current').notNull().default(0),
+  streakLongest: integer('streak_longest').notNull().default(0),
+  graceDays: integer('grace_days').notNull().default(0),
+  steps: jsonb('steps'), // [{ title, minutes, ord, hasAlarm }]
+  createdAt: tsNow(),
+  updatedAt: tsNow(),
+  serverVersion: integer('server_version').notNull().default(1),
+  deletedAt: tsNull(),
+});
+
+// ============================================================================
+// alarms (time-critical alerts; ApiSpec §5.6, §7.5). The client owns delivery
+// (iOS reality caveat); the server just stores them. `task_id` is nullable
+// (a wake alarm has no task).
+// ============================================================================
+export const alarms = pgTable(
+  'alarms',
+  {
+    id: uuid('id').primaryKey(),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id),
+    taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'cascade' }),
+    fireAt: tsNull(),
+    type: smallint('type').notNull().default(0), // 0 wake,1 taskStart,2 routineStep,3 leaveBy
+    soundName: text('sound_name'),
+    snoozeMinutes: integer('snooze_minutes'),
+    usesLiveActivity: boolean('uses_live_activity').notNull().default(false),
+    createdAt: tsNow(),
+    updatedAt: tsNow(),
+    serverVersion: integer('server_version').notNull().default(1),
+    deletedAt: tsNull(),
+  },
+  (t) => [index('alarms_task_idx').on(t.taskId)],
+);
+
 // --- Inferred row types (handy in repositories/services) -------------------
 export type UserRow = typeof users.$inferSelect;
 export type DeviceRow = typeof devices.$inferSelect;
@@ -322,6 +375,8 @@ export type TagRow = typeof tags.$inferSelect;
 export type TaskRow = typeof tasks.$inferSelect;
 export type ReminderRow = typeof reminders.$inferSelect;
 export type ChecklistItemRow = typeof checklistItems.$inferSelect;
+export type RoutineRow = typeof routines.$inferSelect;
+export type AlarmRow = typeof alarms.$inferSelect;
 export type ChangeLogRow = typeof changeLog.$inferSelect;
 export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
 
@@ -336,6 +391,8 @@ export const schema = {
   taskTags,
   reminders,
   checklistItems,
+  routines,
+  alarms,
   changeLog,
   idempotencyKeys,
 };

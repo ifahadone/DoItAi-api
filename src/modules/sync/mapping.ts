@@ -15,6 +15,8 @@ import type {
   TagRow,
   ReminderRow,
   ChecklistItemRow,
+  RoutineRow,
+  AlarmRow,
 } from '@/db/schema.js';
 import type { EntityType } from '@/contract/schemas.js';
 
@@ -130,6 +132,44 @@ export function checklistItemRowToPayload(row: ChecklistItemRow): Record<string,
   };
 }
 
+export function routineRowToPayload(row: RoutineRow): Record<string, unknown> {
+  return {
+    id: row.id,
+    ownerId: row.ownerId,
+    name: row.name,
+    colorHex: row.colorHex,
+    anchorTime: row.anchorTime,
+    recurrence: row.recurrence ?? null,
+    chained: row.chained,
+    isHabit: row.isHabit,
+    streakCurrent: row.streakCurrent,
+    streakLongest: row.streakLongest,
+    graceDays: row.graceDays,
+    steps: row.steps ?? [],
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
+    serverVersion: row.serverVersion,
+    deletedAt: iso(row.deletedAt),
+  };
+}
+
+export function alarmRowToPayload(row: AlarmRow): Record<string, unknown> {
+  return {
+    id: row.id,
+    ownerId: row.ownerId,
+    taskId: row.taskId,
+    fireAt: iso(row.fireAt),
+    type: row.type,
+    soundName: row.soundName,
+    snoozeMinutes: row.snoozeMinutes,
+    usesLiveActivity: row.usesLiveActivity,
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
+    serverVersion: row.serverVersion,
+    deletedAt: iso(row.deletedAt),
+  };
+}
+
 /**
  * Patch-field allowlist per entity: only these keys map to columns on upsert.
  * `tagIds` is handled out-of-band (join table) for tasks, so it is NOT here.
@@ -164,4 +204,7 @@ export const upsertableColumns: Record<EntityType, readonly string[]> = {
   tag: ['name', 'colorHex'],
   reminder: ['taskId', 'kind', 'fireAt', 'offsetMinutes', 'region', 'interruption', 'notificationId'],
   checklist: ['taskId', 'text', 'done', 'ord'],
+  // streakCurrent/streakLongest are server-owned (POST /habits/{id}/log) — NOT client-writable.
+  routine: ['name', 'colorHex', 'anchorTime', 'recurrence', 'chained', 'isHabit', 'graceDays', 'steps'],
+  alarm: ['taskId', 'fireAt', 'type', 'soundName', 'snoozeMinutes', 'usesLiveActivity'],
 };
