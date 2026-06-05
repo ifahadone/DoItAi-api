@@ -22,6 +22,8 @@ import {
   checklistItems,
   routines,
   alarms,
+  noteFolders,
+  notes,
   changeLog,
   idempotencyKeys,
 } from '@/db/schema.js';
@@ -34,6 +36,8 @@ import {
   checklistItemRowToPayload,
   routineRowToPayload,
   alarmRowToPayload,
+  noteFolderRowToPayload,
+  noteRowToPayload,
   upsertableColumns,
 } from '@/modules/sync/mapping.js';
 
@@ -171,6 +175,32 @@ export async function loadCurrent(
       updatedAt: row.updatedAt,
       deleted: row.deletedAt !== null,
       payload: alarmRowToPayload(row),
+    };
+  }
+  if (entityType === 'noteFolder') {
+    const rows = await tx.select().from(noteFolders).where(eq(noteFolders.id, entityId)).limit(1);
+    const row = rows[0];
+    if (!row) return ABSENT;
+    return {
+      exists: true,
+      ownerId: row.ownerId,
+      serverVersion: row.serverVersion,
+      updatedAt: row.updatedAt,
+      deleted: row.deletedAt !== null,
+      payload: noteFolderRowToPayload(row),
+    };
+  }
+  if (entityType === 'note') {
+    const rows = await tx.select().from(notes).where(eq(notes.id, entityId)).limit(1);
+    const row = rows[0];
+    if (!row) return ABSENT;
+    return {
+      exists: true,
+      ownerId: row.ownerId,
+      serverVersion: row.serverVersion,
+      updatedAt: row.updatedAt,
+      deleted: row.deletedAt !== null,
+      payload: noteRowToPayload(row),
     };
   }
   // tag
@@ -384,6 +414,52 @@ export async function applyUpsert(args: ApplyUpsertArgs, tx: Tx): Promise<Record
     return alarmRowToPayload(fresh[0]!);
   }
 
+  if (args.entityType === 'noteFolder') {
+    const colVals = cols as unknown as Partial<typeof noteFolders.$inferInsert>;
+    if (args.isNew) {
+      await tx.insert(noteFolders).values({
+        ...colVals,
+        id: args.entityId,
+        ownerId: args.ownerId,
+        name: typeof cols['name'] === 'string' ? (cols['name'] as string) : '',
+        createdAt: args.nowIso,
+        updatedAt: args.nowIso,
+        serverVersion: args.newVersion,
+        deletedAt: null,
+      });
+    } else {
+      await tx
+        .update(noteFolders)
+        .set({ ...colVals, updatedAt: args.nowIso, serverVersion: args.newVersion })
+        .where(eq(noteFolders.id, args.entityId));
+    }
+    const fresh = await tx.select().from(noteFolders).where(eq(noteFolders.id, args.entityId)).limit(1);
+    return noteFolderRowToPayload(fresh[0]!);
+  }
+
+  if (args.entityType === 'note') {
+    const colVals = cols as unknown as Partial<typeof notes.$inferInsert>;
+    if (args.isNew) {
+      await tx.insert(notes).values({
+        ...colVals,
+        id: args.entityId,
+        ownerId: args.ownerId,
+        title: typeof cols['title'] === 'string' ? (cols['title'] as string) : '',
+        createdAt: args.nowIso,
+        updatedAt: args.nowIso,
+        serverVersion: args.newVersion,
+        deletedAt: null,
+      });
+    } else {
+      await tx
+        .update(notes)
+        .set({ ...colVals, updatedAt: args.nowIso, serverVersion: args.newVersion })
+        .where(eq(notes.id, args.entityId));
+    }
+    const fresh = await tx.select().from(notes).where(eq(notes.id, args.entityId)).limit(1);
+    return noteRowToPayload(fresh[0]!);
+  }
+
   // tag
   const colVals = cols as unknown as Partial<typeof tags.$inferInsert>;
   if (args.isNew) {
@@ -431,6 +507,10 @@ export async function applyDelete(args: ApplyDeleteArgs, tx: Tx): Promise<void> 
     await tx.update(routines).set(patch).where(eq(routines.id, args.entityId));
   } else if (args.entityType === 'alarm') {
     await tx.update(alarms).set(patch).where(eq(alarms.id, args.entityId));
+  } else if (args.entityType === 'noteFolder') {
+    await tx.update(noteFolders).set(patch).where(eq(noteFolders.id, args.entityId));
+  } else if (args.entityType === 'note') {
+    await tx.update(notes).set(patch).where(eq(notes.id, args.entityId));
   } else {
     await tx.update(checklistItems).set(patch).where(eq(checklistItems.id, args.entityId));
   }

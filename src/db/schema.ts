@@ -502,6 +502,48 @@ export const comments = pgTable(
   (t) => [index('comments_task_idx').on(t.taskId)],
 );
 
+// ============================================================================
+// Keeper: note folders + notes (a personal knowledge keeper; ApiSpec §5.9).
+// Owner-only, synced like any other entity.
+// ============================================================================
+export const noteFolders = pgTable(
+  'note_folders',
+  {
+    id: uuid('id').primaryKey(),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id),
+    name: text('name').notNull(),
+    colorHex: text('color_hex').notNull().default('#8E8E93'),
+    icon: text('icon').notNull().default('folder'),
+    sortIndex: integer('sort_index').notNull().default(0),
+    createdAt: tsNow(),
+    updatedAt: tsNow(),
+    serverVersion: integer('server_version').notNull().default(1),
+    deletedAt: tsNull(),
+  },
+  (t) => [index('note_folders_owner_idx').on(t.ownerId)],
+);
+
+export const notes = pgTable(
+  'notes',
+  {
+    id: uuid('id').primaryKey(),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id),
+    folderId: uuid('folder_id').references(() => noteFolders.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    body: text('body').notNull().default(''),
+    pinned: boolean('pinned').notNull().default(false),
+    createdAt: tsNow(),
+    updatedAt: tsNow(),
+    serverVersion: integer('server_version').notNull().default(1),
+    deletedAt: tsNull(),
+  },
+  (t) => [index('notes_owner_idx').on(t.ownerId), index('notes_folder_idx').on(t.folderId)],
+);
+
 // --- Inferred row types (handy in repositories/services) -------------------
 export type UserRow = typeof users.$inferSelect;
 export type DeviceRow = typeof devices.$inferSelect;
@@ -519,6 +561,8 @@ export type ShareRow = typeof shares.$inferSelect;
 export type ShareMemberRow = typeof shareMembers.$inferSelect;
 export type InviteRow = typeof invites.$inferSelect;
 export type CommentRow = typeof comments.$inferSelect;
+export type NoteFolderRow = typeof noteFolders.$inferSelect;
+export type NoteRow = typeof notes.$inferSelect;
 export type ChangeLogRow = typeof changeLog.$inferSelect;
 export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
 
@@ -541,6 +585,8 @@ export const schema = {
   shareMembers,
   invites,
   comments,
+  noteFolders,
+  notes,
   changeLog,
   idempotencyKeys,
 };

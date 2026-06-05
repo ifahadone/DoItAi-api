@@ -232,6 +232,35 @@ export const TaskListPatchSchema = TaskListCreateSchema.partial().omit({ id: tru
 export type TaskListPatch = z.infer<typeof TaskListPatchSchema>;
 
 // ============================================================================
+// Keeper: note folders + notes (synced; ApiSpec §5.9)
+// ============================================================================
+export const NoteFolderCreateSchema = z
+  .object({
+    id: zUuid,
+    name: z.string().min(1),
+    colorHex: zColorHex.default('#8E8E93'),
+    icon: z.string().min(1).default('folder'),
+    sortIndex: z.number().int().default(0),
+  })
+  .strict();
+export type NoteFolderCreate = z.infer<typeof NoteFolderCreateSchema>;
+export const NoteFolderPatchSchema = NoteFolderCreateSchema.partial().omit({ id: true });
+export type NoteFolderPatch = z.infer<typeof NoteFolderPatchSchema>;
+
+export const NoteCreateSchema = z
+  .object({
+    id: zUuid,
+    folderId: zUuid.nullable().default(null),
+    title: z.string().min(1),
+    body: z.string().default(''),
+    pinned: z.boolean().default(false),
+  })
+  .strict();
+export type NoteCreate = z.infer<typeof NoteCreateSchema>;
+export const NotePatchSchema = NoteCreateSchema.partial().omit({ id: true });
+export type NotePatch = z.infer<typeof NotePatchSchema>;
+
+// ============================================================================
 // Tag
 // ============================================================================
 
@@ -430,6 +459,8 @@ export const zEntityType = z.enum([
   'routine',
   'alarm',
   'comment',
+  'noteFolder',
+  'note',
 ]);
 export type EntityType = z.infer<typeof zEntityType>;
 
@@ -528,4 +559,6 @@ export const patchSchemaByEntity = {
   // Comments are created via REST (POST /tasks/:id/comments), never via sync push — this empty patch
   // makes the type total; the sync commit also rejects 'comment' ops outright.
   comment: z.object({}).strict(),
+  noteFolder: NoteFolderPatchSchema,
+  note: NotePatchSchema,
 } as const satisfies Record<EntityType, z.ZodTypeAny>;
