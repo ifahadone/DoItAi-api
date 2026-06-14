@@ -18,7 +18,7 @@ import { parseOrThrow } from '@/lib/validate.js';
 import { errors } from '@/lib/errors.js';
 import { getAiClient, MODEL_BY_TIER, zeroUsage, type AiClient, type AiUsage } from './client.js';
 import { requireAiConsent, type ConsentedUser } from './consent.js';
-import { assertWithinBudget, recordUsage } from './usage.js';
+import { assertWithinBudget, assertAiRateLimit, recordUsage } from './usage.js';
 import { runStructured } from './structured.js';
 import { solveSchedule, type SolverTask } from './solver.js';
 import {
@@ -45,6 +45,7 @@ interface AiContext {
 /** The shared guard: auth + consent + budget. (The client is nullable — see `AiContext`.) */
 async function aiContext(request: FastifyRequest, nowIso: string): Promise<AiContext> {
   const { id: userId } = requireUser(request);
+  await assertAiRateLimit(userId, request.ip);
   const user = await requireAiConsent(userId);
   await assertWithinBudget(userId, nowIso);
   return { userId, user, client: getAiClient() };

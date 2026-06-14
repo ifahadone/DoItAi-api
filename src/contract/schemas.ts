@@ -232,7 +232,7 @@ export const TaskListPatchSchema = TaskListCreateSchema.partial().omit({ id: tru
 export type TaskListPatch = z.infer<typeof TaskListPatchSchema>;
 
 // ============================================================================
-// Keeper: note folders + notes (synced; ApiSpec §5.9)
+// Keeper: note folders + notes (synced). Added feature — not in the original ApiSpec; see DevelopmentPlan §10.5.
 // ============================================================================
 export const NoteFolderCreateSchema = z
   .object({

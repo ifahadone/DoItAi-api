@@ -9,7 +9,25 @@ import { db } from '@/db/client.js';
 import { aiUsage } from '@/db/schema.js';
 import { env } from '@/config/env.js';
 import { errors } from '@/lib/errors.js';
+import { getRedis } from '@/redis/client.js';
 import type { AiUsage } from './client.js';
+
+/** Short-window request throttle (separate from the monthly token budget) so a runaway client can't
+ *  hammer the paid LLM. Per-user and per-IP fixed 60s windows via Redis INCR/EXPIRE. No-ops when Redis
+ *  is absent (local/test) — the monthly budget remains the backstop. */
+const AI_REQUESTS_PER_MIN = 20;
+export async function assertAiRateLimit(userId: string, ip: string): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+  for (const { key, max } of [
+    { key: `airl:u:${userId}`, max: AI_REQUESTS_PER_MIN },
+    { key: `airl:ip:${ip}`, max: AI_REQUESTS_PER_MIN * 2 },
+  ]) {
+    const n = await redis.incr(key);
+    if (n === 1) await redis.expire(key, 60);
+    if (n > max) throw errors.rateLimited(`AI rate limit reached (max ${max}/min). Try again shortly.`);
+  }
+}
 
 /** Sum of input+output tokens this user has spent since the start of the current UTC month. */
 export async function monthlyTokens(userId: string, nowIso: string): Promise<number> {

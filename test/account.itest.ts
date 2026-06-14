@@ -10,7 +10,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '@/app.js';
 import { db, pool, closeDb } from '@/db/client.js';
-import { tasks, taskLists, tags, subscriptions, users } from '@/db/schema.js';
+import { tasks, taskLists, tags, subscriptions, users, notes, noteFolders, comments, shares, shareMembers, invites } from '@/db/schema.js';
 
 let app: FastifyInstance;
 
@@ -47,7 +47,7 @@ afterAll(async () => {
 beforeEach(async () => {
   const url = process.env.DATABASE_URL ?? '';
   if (!/@(localhost|127\.0\.0\.1)[:/]/.test(url)) throw new Error('Refusing to TRUNCATE: DATABASE_URL is not local.');
-  await pool.query('TRUNCATE users, devices, refresh_tokens, task_lists, tags, tasks, task_tags, subscriptions, change_log RESTART IDENTITY CASCADE');
+  await pool.query('TRUNCATE users, devices, refresh_tokens, task_lists, tags, tasks, task_tags, subscriptions, change_log, notes, note_folders, comments, shares, share_members, invites RESTART IDENTITY CASCADE');
 });
 
 describe('account', () => {
@@ -80,5 +80,48 @@ describe('account', () => {
     // Re-running the delete is a no-op (no rows, no error).
     const del2 = await app.inject({ method: 'DELETE', url: '/api/v1/account', headers: { authorization: `Bearer ${accessToken}` } });
     expect(del2.statusCode).toBe(204);
+  });
+
+  it('deletes an account that owns notes, comments, shares, and assigned tasks (FK-safe)', async () => {
+    const me = await signIn(`u-${randomUUID()}`) as unknown as { accessToken: string; userId: string };
+    const mate = await signIn(`m-${randomUUID()}`) as unknown as { accessToken: string; userId: string };
+    const nowIso = new Date(0).toISOString();
+
+    // Keeper: a folder + a note in it.
+    const [folder] = await db.insert(noteFolders).values({ id: randomUUID(), ownerId: me.userId, name: 'Ideas', createdAt: nowIso, updatedAt: nowIso }).returning();
+    await db.insert(notes).values({ id: randomUUID(), ownerId: me.userId, folderId: folder.id, title: 'n', body: 'b', createdAt: nowIso, updatedAt: nowIso });
+
+    // My list + task + my comment on it.
+    const [list] = await db.insert(taskLists).values({ id: randomUUID(), ownerId: me.userId, name: 'L', createdAt: nowIso, updatedAt: nowIso }).returning();
+    const [task] = await db.insert(tasks).values({ id: randomUUID(), ownerId: me.userId, title: 't', listId: list.id, createdAt: nowIso, updatedAt: nowIso }).returning();
+    await db.insert(comments).values({ id: randomUUID(), ownerId: me.userId, taskId: task.id, body: 'hi', createdAt: nowIso, updatedAt: nowIso });
+
+    // My share of my list, with mate as a member, plus an invite I created.
+    const [share] = await db.insert(shares).values({ id: randomUUID(), listId: list.id, ownerId: me.userId, createdAt: nowIso }).returning();
+    await db.insert(shareMembers).values({ id: randomUUID(), shareId: share.id, userId: mate.userId, role: 'editor', joinedAt: nowIso });
+    await db.insert(invites).values({ token: `tok-${randomUUID()}`, shareId: share.id, role: 'editor', createdBy: me.userId, createdAt: nowIso });
+
+    // I'm a member of mate's share; and mate has a task ASSIGNED to me.
+    const [mlist] = await db.insert(taskLists).values({ id: randomUUID(), ownerId: mate.userId, name: 'ML', createdAt: nowIso, updatedAt: nowIso }).returning();
+    const [mshare] = await db.insert(shares).values({ id: randomUUID(), listId: mlist.id, ownerId: mate.userId, createdAt: nowIso }).returning();
+    await db.insert(shareMembers).values({ id: randomUUID(), shareId: mshare.id, userId: me.userId, role: 'viewer', joinedAt: nowIso });
+    const [assigned] = await db.insert(tasks).values({ id: randomUUID(), ownerId: mate.userId, title: 'assigned', listId: mlist.id, assigneeUserId: me.userId, createdAt: nowIso, updatedAt: nowIso }).returning();
+
+    // The previously-broken path: this must NOT raise a foreign-key violation.
+    const del = await app.inject({ method: 'DELETE', url: '/api/v1/account', headers: { authorization: `Bearer ${me.accessToken}` } });
+    expect(del.statusCode, del.body).toBe(204);
+
+    // My account + owned data are gone.
+    expect(await db.select().from(users).where(eq(users.id, me.userId))).toHaveLength(0);
+    expect(await db.select().from(notes).where(eq(notes.ownerId, me.userId))).toHaveLength(0);
+    expect(await db.select().from(noteFolders).where(eq(noteFolders.ownerId, me.userId))).toHaveLength(0);
+    expect(await db.select().from(comments).where(eq(comments.ownerId, me.userId))).toHaveLength(0);
+    expect(await db.select().from(shares).where(eq(shares.ownerId, me.userId))).toHaveLength(0);
+
+    // Mate survives; their task's assignee was nulled (not deleted).
+    expect(await db.select().from(users).where(eq(users.id, mate.userId))).toHaveLength(1);
+    const [mateTask] = await db.select().from(tasks).where(eq(tasks.id, assigned.id));
+    expect(mateTask).toBeTruthy();
+    expect(mateTask?.assigneeUserId).toBeNull();
   });
 });

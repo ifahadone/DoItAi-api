@@ -503,8 +503,8 @@ export const comments = pgTable(
 );
 
 // ============================================================================
-// Keeper: note folders + notes (a personal knowledge keeper; ApiSpec §5.9).
-// Owner-only, synced like any other entity.
+// Keeper: note folders + notes (a personal knowledge keeper). Added feature — NOT in the original
+// ApiSpec; tracked in DevelopmentPlan §10.5. Owner-only, synced like any other entity.
 // ============================================================================
 export const noteFolders = pgTable(
   'note_folders',
