@@ -12,6 +12,7 @@ import {
   AppleSignInSchema,
   RefreshSchema,
   LogoutSchema,
+  AppleNotificationSchema,
   type TokenPair,
 } from '@/contract/schemas.js';
 import * as authService from '@/auth/service.js';
@@ -36,5 +37,15 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     const body = parseOrThrow(LogoutSchema, request.body);
     await authService.logout(body, app.clock);
     reply.code(204);
+  });
+
+  // POST /auth/apple/notifications — Apple server-to-server notification (NFR-SEC-260). Verifies the
+  // signed payload and purges the account on account-delete / consent-revoked. Unauthenticated (Apple
+  // calls it); acks 200 idempotently so Apple doesn't retry.
+  app.post('/auth/apple/notifications', async (request, reply): Promise<{ ok: true }> => {
+    const body = parseOrThrow(AppleNotificationSchema, request.body);
+    await authService.handleAppleNotification(body.payload);
+    reply.code(200);
+    return { ok: true };
   });
 }

@@ -348,6 +348,14 @@ export const LogoutSchema = z
   .strict();
 export type LogoutRequest = z.infer<typeof LogoutSchema>;
 
+/** Apple server-to-server notification body: `{ payload: "<signed JWT>" }` (NFR-SEC-260). */
+export const AppleNotificationSchema = z
+  .object({
+    payload: z.string().min(1),
+  })
+  .strict();
+export type AppleNotification = z.infer<typeof AppleNotificationSchema>;
+
 /** Token bundle returned by /auth/apple and /auth/refresh. */
 export const TokenPairSchema = z
   .object({

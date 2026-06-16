@@ -7,8 +7,10 @@ import type { Clock } from '@/lib/clock.js';
 import { db } from '@/db/client.js';
 import type { AppleSignIn, RefreshRequest, LogoutRequest, TokenPair } from '@/contract/schemas.js';
 import { verifyAppleIdentityToken } from '@/auth/apple.js';
+import { verifyAppleNotification, isAccountTerminationEvent } from '@/auth/notifications.js';
 import * as repo from '@/auth/repository.js';
 import { issueTokenPair, rotateRefreshToken, revokePresentedToken } from '@/auth/tokens.js';
+import { deleteUserData } from '@/modules/account/service.js';
 
 /**
  * POST /auth/apple. Verify the Apple identity token, upsert user + device, and
@@ -47,4 +49,19 @@ export async function refresh(body: RefreshRequest, clock: Clock): Promise<Token
 /** POST /auth/logout. Revoke this device's refresh token (idempotent). */
 export async function logout(body: LogoutRequest, clock: Clock): Promise<void> {
   await revokePresentedToken(body.refreshToken, clock);
+}
+
+/**
+ * POST /auth/apple/notifications (NFR-SEC-260). Verify Apple's signed server-to-server notification
+ * and, for `account-delete` / `consent-revoked`, purge the user's account (FK-safe; cascades the
+ * user row + refresh tokens). Unknown subjects and email events are acknowledged idempotently so
+ * Apple doesn't retry. Returns the handled event type for diagnostics.
+ */
+export async function handleAppleNotification(payloadJwt: string): Promise<{ handled: string }> {
+  const event = await verifyAppleNotification(payloadJwt);
+  if (isAccountTerminationEvent(event.type)) {
+    const user = await repo.findUserByAppleSub(event.sub);
+    if (user) await deleteUserData(user.id);
+  }
+  return { handled: event.type };
 }
