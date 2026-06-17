@@ -251,6 +251,7 @@ export const NoteCreateSchema = z
   .object({
     id: zUuid,
     folderId: zUuid.nullable().default(null),
+    taskId: zUuid.nullable().default(null),
     title: z.string().min(1),
     body: z.string().default(''),
     pinned: z.boolean().default(false),
@@ -431,6 +432,8 @@ export const RoutineCreateSchema = z
     chained: z.boolean().default(false),
     isHabit: z.boolean().default(false),
     graceDays: z.number().int().nonnegative().default(0),
+    paused: z.boolean().default(false),
+    archived: z.boolean().default(false),
     steps: z.array(RoutineStepSchema).default([]),
   })
   .strict();

@@ -36,7 +36,7 @@ afterAll(async () => { await app.close(); await closeDb(); });
 beforeEach(async () => {
   const url = process.env.DATABASE_URL ?? '';
   if (!/@(localhost|127\.0\.0\.1)[:/]/.test(url)) throw new Error('Refusing to TRUNCATE: DATABASE_URL is not local.');
-  await pool.query('TRUNCATE users, devices, refresh_tokens, task_lists, tags, tasks, task_tags, note_folders, notes, change_log RESTART IDENTITY CASCADE');
+  await pool.query('TRUNCATE users, devices, refresh_tokens, task_lists, tags, tasks, task_tags, note_folders, notes, routines, change_log RESTART IDENTITY CASCADE');
 });
 
 describe('keeper: note folders + notes (synced)', () => {
@@ -99,5 +99,43 @@ describe('keeper: note folders + notes (synced)', () => {
     await push(a.accessToken, [op('note', noteId, { title: 'Private', body: 'secret' })]);
     const bChanges = await changesFor(b.accessToken);
     expect(bChanges.find((c) => c.entityId === noteId)).toBeUndefined();
+  });
+});
+
+// Batch 8: Keeper task-note linking + routine suspend/archive (app+API schema items).
+describe('batch 8: note→task link + routine paused/archived (synced)', () => {
+  it('round-trips a note linked to a task via taskId', async () => {
+    const a = await signIn(`a-${randomUUID()}`);
+    const taskId = randomUUID();
+    const noteId = randomUUID();
+    // Task first so the notes.task_id FK resolves, then the linked note.
+    const res = await push(a.accessToken, [
+      op('task', taskId, { title: 'Write spec' }),
+      op('note', noteId, { title: 'Spec notes', body: 'outline', taskId }),
+    ]);
+    expect(res.statusCode).toBe(200);
+    const note = (await changesFor(a.accessToken)).filter((c) => c.entityId === noteId).pop()!;
+    expect(note.payload!.taskId).toBe(taskId);
+
+    // Unlink via sparse patch → taskId becomes null, other fields preserved.
+    await push(a.accessToken, [op('note', noteId, { taskId: null }, 1, LATER)]);
+    const after = (await changesFor(a.accessToken)).filter((c) => c.entityId === noteId).pop()!;
+    expect(after.payload!.taskId).toBeNull();
+    expect(after.payload!.title).toBe('Spec notes');
+  });
+
+  it('round-trips routine paused/archived flags (default false, patchable)', async () => {
+    const a = await signIn(`a-${randomUUID()}`);
+    const routineId = randomUUID();
+    await push(a.accessToken, [op('routine', routineId, { name: 'Morning' })]);
+    const created = (await changesFor(a.accessToken)).filter((c) => c.entityId === routineId).pop()!;
+    expect(created.payload!.paused).toBe(false);
+    expect(created.payload!.archived).toBe(false);
+
+    await push(a.accessToken, [op('routine', routineId, { paused: true, archived: true }, 1, LATER)]);
+    const patched = (await changesFor(a.accessToken)).filter((c) => c.entityId === routineId).pop()!;
+    expect(patched.payload!.paused).toBe(true);
+    expect(patched.payload!.archived).toBe(true);
+    expect(patched.payload!.name).toBe('Morning'); // untouched field preserved
   });
 });

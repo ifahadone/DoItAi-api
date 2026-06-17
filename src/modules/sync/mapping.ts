@@ -147,6 +147,8 @@ export function routineRowToPayload(row: RoutineRow): Record<string, unknown> {
     streakCurrent: row.streakCurrent,
     streakLongest: row.streakLongest,
     graceDays: row.graceDays,
+    paused: row.paused,
+    archived: row.archived,
     completions: row.completions ?? [],
     steps: row.steps ?? [],
     createdAt: iso(row.createdAt),
@@ -193,6 +195,7 @@ export function noteRowToPayload(row: NoteRow): Record<string, unknown> {
     id: row.id,
     ownerId: row.ownerId,
     folderId: row.folderId,
+    taskId: row.taskId,
     title: row.title,
     body: row.body,
     pinned: row.pinned,
@@ -238,9 +241,9 @@ export const upsertableColumns: Record<EntityType, readonly string[]> = {
   reminder: ['taskId', 'kind', 'fireAt', 'offsetMinutes', 'region', 'interruption', 'notificationId'],
   checklist: ['taskId', 'text', 'done', 'ord'],
   // streakCurrent/streakLongest are server-owned (POST /habits/{id}/log) — NOT client-writable.
-  routine: ['name', 'colorHex', 'anchorTime', 'recurrence', 'chained', 'isHabit', 'graceDays', 'steps'],
+  routine: ['name', 'colorHex', 'anchorTime', 'recurrence', 'chained', 'isHabit', 'graceDays', 'paused', 'archived', 'steps'],
   alarm: ['taskId', 'fireAt', 'type', 'soundName', 'snoozeMinutes', 'usesLiveActivity'],
   comment: [], // REST-only; never upserted via sync push
   noteFolder: ['name', 'colorHex', 'icon', 'sortIndex'],
-  note: ['folderId', 'title', 'body', 'pinned'],
+  note: ['folderId', 'taskId', 'title', 'body', 'pinned'],
 };

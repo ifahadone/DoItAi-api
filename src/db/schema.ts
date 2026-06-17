@@ -333,6 +333,8 @@ export const routines = pgTable('routines', {
   streakCurrent: integer('streak_current').notNull().default(0),
   streakLongest: integer('streak_longest').notNull().default(0),
   graceDays: integer('grace_days').notNull().default(0),
+  paused: boolean('paused').notNull().default(false), // suspended: no materialization/alarms while true
+  archived: boolean('archived').notNull().default(false), // hidden from active lists, kept for history
   completions: jsonb('completions'), // ["YYYY-MM-DD", …] — server-owned (POST /habits/{id}/log)
   steps: jsonb('steps'), // [{ title, minutes, ord, hasAlarm }]
   createdAt: tsNow(),
@@ -533,6 +535,7 @@ export const notes = pgTable(
       .notNull()
       .references(() => users.id),
     folderId: uuid('folder_id').references(() => noteFolders.id, { onDelete: 'set null' }),
+    taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }), // optional link to a task
     title: text('title').notNull(),
     body: text('body').notNull().default(''),
     pinned: boolean('pinned').notNull().default(false),
@@ -541,7 +544,11 @@ export const notes = pgTable(
     serverVersion: integer('server_version').notNull().default(1),
     deletedAt: tsNull(),
   },
-  (t) => [index('notes_owner_idx').on(t.ownerId), index('notes_folder_idx').on(t.folderId)],
+  (t) => [
+    index('notes_owner_idx').on(t.ownerId),
+    index('notes_folder_idx').on(t.folderId),
+    index('notes_task_idx').on(t.taskId),
+  ],
 );
 
 // --- Inferred row types (handy in repositories/services) -------------------
