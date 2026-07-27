@@ -18,7 +18,7 @@ import Fastify, {
 } from 'fastify';
 import cors from '@fastify/cors';
 import { randomUUID } from 'node:crypto';
-import { redisEnabled } from '@/config/env.js';
+import { redisEnabled, env } from '@/config/env.js';
 import { logger } from '@/lib/logger.js';
 import { toErrorEnvelope, errors, AppError } from '@/lib/errors.js';
 import { systemClock, type Clock } from '@/lib/clock.js';
@@ -68,7 +68,35 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
 
   app.decorate('clock', opts.clock ?? systemClock);
 
-  await app.register(cors, { origin: true });
+  // CORS: restrict to a configured allowlist when set (a web/admin client exists); otherwise reflect
+  // any origin — harmless for the native app, which sends no Origin header (NFR-SEC).
+  await app.register(cors, { origin: env.CORS_ALLOWED_ORIGINS ?? true });
+
+  // Per-IP fixed-window rate limit on every route (skipped in tests, which fire many requests in-process).
+  // AI routes keep their own per-user token budget on top of this. Single-instance/in-memory — the
+  // scale-out path is a Redis-backed limiter, but this closes the enumeration/spam gap for a single node.
+  if (env.NODE_ENV !== 'test') {
+    const hits = new Map<string, { count: number; resetAt: number }>();
+    const windowMs = env.RATE_LIMIT_WINDOW_MS;
+    const max = env.RATE_LIMIT_MAX;
+    app.addHook('onRequest', async (request, reply) => {
+      if (request.url === '/health' || request.url === '/ready') return; // don't throttle probes
+      const now = Date.now();
+      // Opportunistic cleanup so the map can't grow unbounded under IP churn.
+      if (hits.size > 10_000) for (const [k, v] of hits) if (v.resetAt <= now) hits.delete(k);
+      const key = request.ip || 'unknown';
+      const entry = hits.get(key);
+      if (!entry || entry.resetAt <= now) {
+        hits.set(key, { count: 1, resetAt: now + windowMs });
+        return;
+      }
+      entry.count += 1;
+      if (entry.count > max) {
+        reply.header('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)));
+        throw errors.rateLimited('Too many requests. Please slow down and try again shortly.');
+      }
+    });
+  }
 
   // Always surface the request id so clients can quote it in bug reports.
   app.addHook('onSend', async (request, reply) => {

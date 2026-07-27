@@ -82,6 +82,18 @@ const EnvSchema = z
     APNS_BUNDLE_ID: z.string().optional(),
     APNS_AUTH_KEY: z.string().optional(),
     APNS_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
+
+    // CORS: comma-separated allowlist of browser origins. Unset ⇒ reflect any origin (fine for the
+    // native app, which sends no Origin). Set to lock down when a web/admin client exists (NFR-SEC).
+    CORS_ALLOWED_ORIGINS: z
+      .string()
+      .optional()
+      .transform((v) => (v && v.trim() !== '' ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined)),
+
+    // Per-IP fixed-window rate limit for the API (skipped in tests). Protects against enumeration /
+    // spam on non-AI routes; AI routes keep their own per-user budget/limit (ApiSpec §9.6).
+    RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
+    RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   })
   .superRefine((val, ctx) => {
     // Safety rail: stub Apple verification must never be active in production.
